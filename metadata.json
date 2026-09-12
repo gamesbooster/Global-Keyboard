@@ -1,0 +1,6 @@
+{
+  "name": "Global Keyboard Dynamic",
+  "description": "Smart multilingual dynamic keyboard with transliteration, real-time voice typing, themes, layout styles, and AI writing tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

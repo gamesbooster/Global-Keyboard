@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Global Keyboard Dynamic</string>
+    <string name="keyboard_service_name">Global Keyboard Dynamic</string>
+    <string name="app_tagline">Smart. Multilingual. Dynamic.</string>
+    <string name="enable_keyboard_title">Enable Global Keyboard Dynamic</string>
+    <string name="enable_keyboard_desc">To use Global Keyboard Dynamic, activate it in your Android Input Method settings.</string>
+    <string name="enable_keyboard_button">Enable Keyboard</string>
+    <string name="select_keyboard_button">Select Global Keyboard Dynamic</string>
+    <string name="test_keyboard_hint">Try typing here…</string>
+    <string name="privacy_title">Privacy First Architecture</string>
+    <string name="privacy_desc">Normal keystrokes are processed locally and never leave your device. Your privacy is 100% safeguarded.</string>
+    <string name="voice_male">Male Voice</string>
+    <string name="voice_female">Female Voice</string>
+    <string name="auto_detect_lang">Auto Detect</string>
+</resources>
