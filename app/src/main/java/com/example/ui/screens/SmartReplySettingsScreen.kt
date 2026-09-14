@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -19,13 +20,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.LingoKeyPreferences
 import com.example.engine.smartreply.DefaultSmartReplyUsageRepository
 import com.example.engine.smartreply.SmartReplyRepository
-import com.example.model.SmartReplyTone
-import com.example.model.SmartReplyUiState
+import com.example.model.*
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,17 +34,26 @@ import kotlinx.coroutines.launch
 fun SmartReplySettingsScreen(
     preferences: LingoKeyPreferences,
     onBack: () -> Unit,
-    onNavigateToPro: () -> Unit = {}
+    onNavigateToPro: () -> Unit = {},
+    onNavigateToSpinAndWin: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
 
     val isDarkMode by preferences.isDarkMode.collectAsState()
     val isPremiumUser by preferences.isPremiumUser.collectAsState()
+    val aiCredits by preferences.aiCredits.collectAsState()
     val smartReplyEnabled by preferences.smartReplyEnabled.collectAsState()
-    val smartReplyDefaultTone by preferences.smartReplyDefaultTone.collectAsState()
+    val smartReplyDefaultStyleId by preferences.smartReplyDefaultStyleId.collectAsState()
     val smartReplyLanguage by preferences.smartReplyLanguage.collectAsState()
     val smartReplyMaxSuggestions by preferences.smartReplyMaxSuggestions.collectAsState()
     val smartReplyUsageCount by preferences.smartReplyUsageCount.collectAsState()
+
+    val currentDefaultStyle = remember(smartReplyDefaultStyleId) {
+        SmartReplyLibrary.findById(smartReplyDefaultStyleId)
+    }
+
+    var selectedSettingsCategory by remember { mutableStateOf(SmartReplyStyleCategory.SMART_AUTO) }
+    var styleSearchQuery by remember { mutableStateOf("") }
 
     val bgColor = if (isDarkMode) Color(0xFF0F1016) else Color(0xFFF8FAFC)
     val cardColor = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
@@ -54,6 +64,7 @@ fun SmartReplySettingsScreen(
 
     // Interactive Test State
     var testMessage by remember { mutableStateOf("Bhai kal meeting kitne baje hai? Are we finalizing the project?") }
+    var testSelectedStyle by remember { mutableStateOf(SmartReplyLibrary.SMART_MATCH) }
     var testUiState by remember { mutableStateOf<SmartReplyUiState>(SmartReplyUiState.Idle) }
 
     val repository = remember {
@@ -102,19 +113,26 @@ fun SmartReplySettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(primaryColor),
-                        contentAlignment = Alignment.Center
+                    Surface(
+                        shape = CircleShape,
+                        color = primaryColor.copy(alpha = 0.2f),
+                        modifier = Modifier.size(48.dp)
                     ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = primaryColor, modifier = Modifier.size(24.dp))
+                        }
                     }
+
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Instant Contextual Replies", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "Paste any received message into Keyboard → Tools → Smart Reply to get 3–5 intelligent, multilingual suggestions.",
+                            text = "Smart Reply & Tone Library",
+                            color = textColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Browse 60+ styles across 10 categories, purpose-driven replies, and multilingual context matching.",
                             color = textMuted,
                             fontSize = 12.sp,
                             lineHeight = 16.sp
@@ -123,7 +141,7 @@ fun SmartReplySettingsScreen(
                 }
             }
 
-            // Master Enable Toggle
+            // Enable / Disable Smart Reply Switch
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = cardColor,
@@ -138,8 +156,8 @@ fun SmartReplySettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Enable Smart Reply", color = textColor, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Show Smart Reply in keyboard tools & toolbar", color = textMuted, fontSize = 12.sp)
+                        Text("Enable Smart Reply", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Show Smart Reply tool in keyboard toolbar", color = textMuted, fontSize = 12.sp)
                     }
                     Switch(
                         checked = smartReplyEnabled,
@@ -149,7 +167,7 @@ fun SmartReplySettingsScreen(
                 }
             }
 
-            // Quota / VIP Card
+            // Daily Quota & VIP status
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = cardColor,
@@ -162,21 +180,28 @@ fun SmartReplySettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(
-                                if (isPremiumUser) Icons.Default.WorkspacePremium else Icons.Default.ElectricBolt,
-                                contentDescription = null,
-                                tint = if (isPremiumUser) Color(0xFFF59E0B) else primaryColor
-                            )
-                            Text(
-                                if (isPremiumUser) "VIP Unlimited Access" else "Daily Free Quota",
-                                color = textColor,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                            Text("Usage Quota", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         }
 
-                        if (!isPremiumUser) {
+                        if (isPremiumUser) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    "👑 VIP Unlimited",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        } else {
                             Button(
                                 onClick = onNavigateToPro,
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
@@ -191,7 +216,7 @@ fun SmartReplySettingsScreen(
 
                     if (isPremiumUser) {
                         Text(
-                            "You have unlimited Smart Reply generations across all languages and styles.",
+                            "You have unlimited Smart Reply generations across all 60+ styles and languages.",
                             color = textMuted,
                             fontSize = 12.sp
                         )
@@ -213,10 +238,44 @@ fun SmartReplySettingsScreen(
                             trackColor = borderColor
                         )
                     }
+
+                    HorizontalDivider(color = borderColor.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("AI Credits Vault:", fontSize = 12.sp, color = textMuted)
+                            Text(
+                                if (isPremiumUser) "Unlimited 👑" else "$aiCredits Credits 🪙",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isPremiumUser) Color(0xFF10B981) else Color(0xFFF59E0B)
+                            )
+                        }
+                        if (!isPremiumUser) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF0F766E).copy(alpha = 0.15f),
+                                modifier = Modifier.clickable { onNavigateToSpinAndWin() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("🎰", fontSize = 12.sp)
+                                    Text("Spin & Win", fontSize = 11.5.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            // Default Tone Configuration
+            // Default Style Configuration (Full Reply Style & Tone Library)
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = cardColor,
@@ -224,29 +283,78 @@ fun SmartReplySettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Default Tone", color = textColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Choose the initial reply style when opening Smart Reply:", color = textMuted, fontSize = 12.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Default Reply Style", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("Active: ${currentDefaultStyle.emoji} ${currentDefaultStyle.displayName}", color = primaryColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Category Tabs
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (cat in SmartReplyStyleCategory.values()) {
+                            val isSel = (selectedSettingsCategory == cat)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) primaryColor else bgColor,
+                                border = BorderStroke(1.dp, if (isSel) primaryColor else borderColor),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedSettingsCategory = cat }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(cat.iconEmoji, fontSize = 12.sp)
+                                    Text(
+                                        cat.displayName,
+                                        color = if (isSel) Color.White else textColor,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Styles list in selected category
+                    val stylesInCat = remember(selectedSettingsCategory) {
+                        SmartReplyLibrary.getStylesForCategory(selectedSettingsCategory)
+                    }
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (tone in SmartReplyTone.values()) {
-                            val isSelected = smartReplyDefaultTone.equals(tone.name, ignoreCase = true)
+                        for (style in stylesInCat) {
+                            val isSelected = (currentDefaultStyle.id == style.id)
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
                                 color = if (isSelected) primaryColor.copy(alpha = 0.12f) else bgColor,
                                 border = BorderStroke(1.dp, if (isSelected) primaryColor else borderColor),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { preferences.setSmartReplyDefaultTone(tone.name) }
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { preferences.setSmartReplyDefaultStyle(style.id) }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(tone.iconEmoji, fontSize = 16.sp)
+                                    Text(style.emoji, fontSize = 18.sp)
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(tone.displayName, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                        Text(tone.promptDescription, color = textMuted, fontSize = 11.sp)
+                                        Text(style.displayName, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(style.promptDescription, color = textMuted, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     }
                                     if (isSelected) {
                                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = primaryColor, modifier = Modifier.size(18.dp))
@@ -274,24 +382,26 @@ fun SmartReplySettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Reply Suggestions Count", color = textColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Number of options generated per message (3–5)", color = textMuted, fontSize = 12.sp)
+                        Text("Number of options generated per message (3–10)", color = textMuted, fontSize = 12.sp)
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(3, 4, 5).forEach { count ->
+                        listOf(3, 5, 8, 10).forEach { count ->
                             val isSelected = (smartReplyMaxSuggestions == count)
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isSelected) primaryColor else bgColor,
                                 border = BorderStroke(1.dp, if (isSelected) primaryColor else borderColor),
-                                modifier = Modifier.clickable { preferences.setSmartReplyMaxSuggestions(count) }
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { preferences.setSmartReplyMaxSuggestions(count) }
                             ) {
                                 Text(
                                     text = "$count",
                                     color = if (isSelected) Color.White else textColor,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
                                 )
                             }
                         }
@@ -307,8 +417,8 @@ fun SmartReplySettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Interactive Smart Reply Test", color = textColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Test reply generation directly with any sample text:", color = textMuted, fontSize = 12.sp)
+                    Text("Interactive Smart Reply Test", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("Test reply generation directly with any sample text and chosen style:", color = textMuted, fontSize = 12.sp)
 
                     OutlinedTextField(
                         value = testMessage,
@@ -318,14 +428,60 @@ fun SmartReplySettingsScreen(
                         placeholder = { Text("Enter received message...", color = textMuted) }
                     )
 
+                    // Test Style Selector (Horizontal scroll)
+                    Text("Selected Test Style: ${testSelectedStyle.emoji} ${testSelectedStyle.displayName}", color = primaryColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(
+                            SmartReplyLibrary.SMART_MATCH,
+                            SmartReplyLibrary.CASUAL,
+                            SmartReplyLibrary.PROFESSIONAL,
+                            SmartReplyLibrary.SWEET,
+                            SmartReplyLibrary.FUNNY,
+                            SmartReplyLibrary.CONFIRM,
+                            SmartReplyLibrary.DECLINE,
+                            SmartReplyLibrary.APOLOGIZE_PURPOSE,
+                            SmartReplyLibrary.SCHEDULE,
+                            SmartReplyLibrary.VERY_SHORT
+                        ).forEach { s ->
+                            val isSel = (testSelectedStyle.id == s.id)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) primaryColor else bgColor,
+                                border = BorderStroke(1.dp, if (isSel) primaryColor else borderColor),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { testSelectedStyle = s }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(s.emoji, fontSize = 11.sp)
+                                    Text(
+                                        s.displayName,
+                                        color = if (isSel) Color.White else textColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Button(
                         onClick = {
                             coroutineScope.launch {
-                                testUiState = SmartReplyUiState.Analyzing("Generating replies...")
-                                val tone = SmartReplyTone.fromString(smartReplyDefaultTone)
+                                testUiState = SmartReplyUiState.Analyzing("Generating replies with ${testSelectedStyle.displayName} style...")
                                 val res = repository.processSmartReply(
                                     message = testMessage,
-                                    tone = tone,
+                                    style = testSelectedStyle,
                                     language = "auto",
                                     maxReplies = smartReplyMaxSuggestions
                                 )
@@ -338,13 +494,15 @@ fun SmartReplySettingsScreen(
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Generate Test Replies", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Generate Test Replies (${testSelectedStyle.displayName})", color = Color.White, fontWeight = FontWeight.Bold)
                     }
 
                     when (val state = testUiState) {
                         is SmartReplyUiState.Analyzing -> {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -356,7 +514,7 @@ fun SmartReplySettingsScreen(
                         is SmartReplyUiState.Success -> {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    "Generated Replies (${state.response.detectedLanguage}):",
+                                    "Generated Replies (${state.response.detectedLanguage} • ${state.response.appliedStyle.displayName}):",
                                     color = primaryColor,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -400,12 +558,15 @@ fun SmartReplySettingsScreen(
                         is SmartReplyUiState.NetworkError -> {
                             Text(state.message, color = Color(0xFFEF4444), fontSize = 12.sp)
                         }
+                        is SmartReplyUiState.ProviderError -> {
+                            Text(state.message, color = Color(0xFFEF4444), fontSize = 12.sp)
+                        }
                         else -> {}
                     }
                 }
             }
 
-            // Privacy Guarantees Box
+            // Privacy Guarantee Card
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = cardColor,
@@ -413,18 +574,21 @@ fun SmartReplySettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
-                        Text("Privacy & Security Architecture", color = textColor, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                        Text("Privacy Guarantee", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Text(
-                        "• Smart Reply only analyzes text that you explicitly copy and paste into the panel.\n" +
-                                "• It does NOT run background monitoring or read conversations.\n" +
-                                "• Password, PIN, OTP, and credential fields are strictly shielded from Smart Reply.\n" +
-                                "• No message is ever sent automatically without your explicit selection.",
+                        "• No screen scraping: Keyboard never scans active apps or chat screens.\n" +
+                        "• Manual trigger only: Smart Reply only analyzes messages you explicitly paste or enter.\n" +
+                        "• Strict credential blocking: Completely disabled in password and PIN fields.\n" +
+                        "• Encrypted processing: Zero persistence of message contents.",
                         color = textMuted,
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
                     )
                 }
             }

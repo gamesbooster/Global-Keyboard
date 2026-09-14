@@ -27,13 +27,12 @@ class GeminiSmartReplyProvider(
 ) : SmartReplyProvider {
 
     private val TAG = "GeminiSmartReply"
-    private val MODEL = "gemini-2.5-flash"
-    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
+    private val CANDIDATE_MODELS = listOf("gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash")
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private fun getApiKey(): String? {
@@ -48,151 +47,162 @@ class GeminiSmartReplyProvider(
     override suspend fun analyzeAndGenerateReplies(request: SmartReplyRequest): Result<SmartReplyResponse> = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
         if (apiKey == null) {
-            // Graceful fallback to genuine local rule & intent-based reply engine
+            // Graceful fallback to local rule & intent-based reply engine
             Log.d(TAG, "No Gemini API key present, using offline smart reply engine")
             return@withContext offlineFallback.analyzeAndGenerateReplies(request)
         }
 
-        try {
-            val systemInstruction = """
-                You are the Smart Reply engine for Global MKeyboard Dynamic.
-                Your ONLY task is to analyze a user-supplied received message and generate 3 to 5 natural, relevant reply options that the user could send.
-                Do not act as a general chatbot.
-                Do not answer questions for the user directly.
-                Do not explain the received message.
-                Do not provide analysis to the user.
-                Do not generate unrelated content.
+        val effectiveStyle = request.style
+        val structuredStyleJson = effectiveStyle.toStructuredJson()
+        val targetRepliesCount = request.maxReplies.coerceIn(3, 10)
 
-                Determine the language and communication style of the supplied message automatically.
-                Preserve the dominant language and natural style unless another output language is explicitly requested.
-                Handle multilingual and code-mixed messages when possible (such as Hinglish, Hindi, Marathi, Bengali, Tamil, Telugu, etc.).
+        val systemInstruction = """
+            You are an advanced, human-like Smart Reply AI engine embedded in a next-generation mobile keyboard (Global MKeyboard Dynamic).
+            Your PRIMARY task is to deeply analyze the incoming message and generate $targetRepliesCount realistic, intelligent, human-like reply choices that a real person would actually send in messaging apps (such as WhatsApp, Instagram, Telegram, Slack, SMS).
 
-                Generate replies that logically match the received message.
-                Do not invent facts that are not present in the message.
-                Provide 3 to 5 different, reasonable, high-quality response choices rather than identical sentences.
+            CORE PRINCIPLES:
+            1. HUMAN THINKING: Think like an empathetic, witty, and contextual human conversationalist. Do not give robotic, canned, or formulaic templates.
+            2. UNIQUE VARIETY: Every suggested reply must be distinctly phrased and present different viable angles or intents (e.g. enthusiastic agreement, confirming specific logistics, asking a relevant follow-up question, polite decline, casual remark, warm acknowledgment, humorous banter, alternative suggestion).
+            3. EXACT LANGUAGE & CODE-MIXING PRESERVATION:
+               - If the input message is in Hinglish (Roman Hindi), reply in natural, authentic Hinglish (e.g. "Haan bhai, bilkul!", "Kal kitne baje milna hai?", "Nahi yaar, thoda busy hoon.").
+               - If in Hindi (Devanagari), reply in natural Hindi.
+               - If in Marathi, Bengali, Tamil, Telugu, Gujarati, Spanish, etc., mirror the natural language and dialect.
+               - If English, reply in natural conversational English.
+            4. STYLE & TONE DIRECTIVE:
+               - Selected Style: ${effectiveStyle.displayName} (${effectiveStyle.category.displayName}).
+               - Prompt Directive: ${effectiveStyle.promptDescription}.
+               - If a specific tone or purpose is defined, let all reply variations reflect that distinct nuance while maintaining natural diversity.
+            5. SAFETY & POLICY:
+               - Under no circumstances produce hate speech, harassment, threats, abusive slurs, sexually explicit content, or dangerous instructions.
+               - If the style is 'Firm', 'Assertive', or 'Boundary Setting', generate polite but unequivocal boundaries without abusive insults.
 
-                STYLE & TONE DIRECTIVE:
-                The user has selected a specific Reply Style from the Reply Style & Tone library.
-                The selected style MUST genuinely influence and define all generated replies.
-                - If the style is a specific TONE (e.g. Professional, Romantic, Witty, Sarcastic, Firm, Caring, Chill), all replies must be voiced in that distinct personality.
-                - If the style is a RESPONSE PURPOSE (e.g. Confirm, Decline, Ask for Clarification, Schedule, Apologize, Thank), all replies must carry out that exact purpose with varied phrasing.
-                - If the style is a LENGTH constraint (e.g. Very Short, Short, Elaborate), the length constraint must be strictly respected.
-                - If the style is 'Smart Match' or 'Auto', automatically select the most appropriate tone, purpose, and length matching the conversation context.
-
-                SAFETY RULE:
-                Under no circumstances generate abusive language, threats, insults, profanity, harassment, intimidation, or illegal content.
-                If the requested style is 'Aggressive', 'Firm', or 'Boundary Setting', generate assertive, unequivocal, firm professional or personal boundaries without abuse or insults.
-
-                Return ONLY structured JSON matching this schema:
+            OUTPUT FORMAT:
+            You MUST return ONLY valid JSON matching this schema:
+            {
+              "detectedLanguage": "string (e.g. Hinglish, Hindi, English, Marathi, Bengali)",
+              "dominantLanguage": "string language code (e.g. en, hi, mr, bn, ta, te)",
+              "isCodeMixed": boolean,
+              "detectedIntent": "string (e.g. meeting_inquiry, invitation, greeting, casual_checkin)",
+              "replies": [
                 {
-                  "detectedLanguage": "string (e.g. English, Hindi, Hinglish, Marathi)",
-                  "dominantLanguage": "string language code (e.g. en, hi, mr, bn)",
-                  "isCodeMixed": boolean,
-                  "detectedIntent": "string (e.g. question, invitation, meeting, gratitude, greeting)",
-                  "replies": [
-                    {
-                      "text": "string (the ready-to-send reply text)",
-                      "tone": "string (the tone name matching the style)",
-                      "confidence": float (0.0 to 1.0)
-                    }
-                  ]
+                  "text": "string (the ready-to-send reply message)",
+                  "tone": "string (the specific nuance, e.g. enthusiastic, casual, inquisitive, polite, witty)",
+                  "confidence": float (0.85 to 1.0)
                 }
-            """.trimIndent()
-
-            val effectiveStyle = request.style
-            val structuredStyleJson = effectiveStyle.toStructuredJson()
-
-            val styleInstruction = if (effectiveStyle.id == "smart_match" || effectiveStyle.id == "auto") {
-                "Smart Match: Automatically deduce the most fitting tone, intent, and length from the incoming message."
-            } else {
-                buildString {
-                    append("Selected Style: ${effectiveStyle.displayName} (${effectiveStyle.category.displayName}). ")
-                    append("Prompt Description: ${effectiveStyle.promptDescription}. ")
-                    effectiveStyle.structuredTone?.let { append("Target Tone: $it. ") }
-                    effectiveStyle.structuredPurpose?.let { append("Target Purpose: $it (all replies must perform this exact intent). ") }
-                    effectiveStyle.structuredLength?.let { append("Length: $it. ") }
-                }
+              ]
             }
+        """.trimIndent()
 
-            val languageInstruction = if (request.requestedLanguage != "auto") {
-                "Force generated replies to be in language code: ${request.requestedLanguage}."
-            } else {
-                "Automatically preserve the sender's language and style (including code-mixing/Hinglish)."
+        val styleInstruction = if (effectiveStyle.id == "smart_match" || effectiveStyle.id == "auto") {
+            "Smart Match: Deduce the ideal conversational tone and diverse response paths from the incoming message context."
+        } else {
+            buildString {
+                append("Selected Style: ${effectiveStyle.displayName} (${effectiveStyle.category.displayName}). ")
+                append("Description: ${effectiveStyle.promptDescription}. ")
+                effectiveStyle.structuredTone?.let { append("Tone: $it. ") }
+                effectiveStyle.structuredPurpose?.let { append("Purpose: $it. ") }
+                effectiveStyle.structuredLength?.let { append("Length constraint: $it. ") }
             }
+        }
 
-            // Structured prompt with defense against prompt injection
-            val userPrompt = """
-                STRUCTURED STYLE PARAMETER:
-                $structuredStyleJson
+        val languageInstruction = if (request.requestedLanguage != "auto") {
+            "Force output replies to be in language code: ${request.requestedLanguage}."
+        } else {
+            "Automatically preserve and match the incoming message's language and style (including Hinglish/code-mixing)."
+        }
 
-                STYLE INSTRUCTION:
-                $styleInstruction
+        val userPrompt = """
+            STRUCTURED STYLE:
+            $structuredStyleJson
 
-                LANGUAGE INSTRUCTION:
-                $languageInstruction
+            STYLE INSTRUCTION:
+            $styleInstruction
 
-                Maximum replies requested: ${request.maxReplies.coerceIn(3, 5)}.
+            LANGUAGE INSTRUCTION:
+            $languageInstruction
 
-                --- BEGIN RECEIVED MESSAGE DATA ---
-                ${request.message}
-                --- END RECEIVED MESSAGE DATA ---
-            """.trimIndent()
+            Please generate exactly $targetRepliesCount diverse, natural, human-like replies.
 
-            val rootJson = JSONObject()
+            --- INCOMING MESSAGE ---
+            ${request.message}
+            --- END MESSAGE ---
+        """.trimIndent()
 
-            // System instruction
-            val sysPart = JSONObject().put("text", systemInstruction)
-            val sysParts = JSONArray().put(sysPart)
-            val sysContent = JSONObject().put("parts", sysParts)
-            rootJson.put("systemInstruction", sysContent)
+        // Attempt generation with candidate models (gemini-3.6-flash -> gemini-3.8-flash -> gemini-flash-latest)
+        var lastException: Exception? = null
 
-            // Content
-            val contentsArray = JSONArray()
-            val contentObj = JSONObject()
-            val partsArray = JSONArray()
-            partsArray.put(JSONObject().put("text", userPrompt))
-            contentObj.put("parts", partsArray)
-            contentsArray.put(contentObj)
-            rootJson.put("contents", contentsArray)
+        for (modelName in CANDIDATE_MODELS) {
+            try {
+                val baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
 
-            // Generation config with JSON response format
-            val genConfig = JSONObject()
-                .put("temperature", 0.7)
-                .put("maxOutputTokens", 1024)
-                .put("responseMimeType", "application/json")
-            rootJson.put("generationConfig", genConfig)
+                val rootJson = JSONObject()
 
-            val requestBody = rootJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-            val httpRequest = Request.Builder()
-                .url("$BASE_URL?key=$apiKey")
-                .post(requestBody)
-                .build()
+                // System instruction
+                val sysPart = JSONObject().put("text", systemInstruction)
+                val sysParts = JSONArray().put(sysPart)
+                val sysContent = JSONObject().put("parts", sysParts)
+                rootJson.put("systemInstruction", sysContent)
 
-            client.newCall(httpRequest).execute().use { response ->
-                val responseString = response.body?.string() ?: ""
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Gemini API error code: ${response.code}, body: $responseString")
-                    if (response.code == 429) {
-                        return@withContext Result.failure(RuntimeException("Rate limit reached. Please wait a moment and try again."))
-                    } else if (response.code == 401 || response.code == 403) {
-                        return@withContext Result.failure(RuntimeException("API authentication error. Please check your credentials."))
+                // Content
+                val contentsArray = JSONArray()
+                val contentObj = JSONObject()
+                val partsArray = JSONArray()
+                partsArray.put(JSONObject().put("text", userPrompt))
+                contentObj.put("parts", partsArray)
+                contentsArray.put(contentObj)
+                rootJson.put("contents", contentsArray)
+
+                // Generation config
+                val genConfig = JSONObject()
+                    .put("temperature", 0.75)
+                    .put("maxOutputTokens", 2048)
+                    .put("responseMimeType", "application/json")
+                rootJson.put("generationConfig", genConfig)
+
+                val requestBody = rootJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                val httpRequest = Request.Builder()
+                    .url("$baseUrl?key=$apiKey")
+                    .post(requestBody)
+                    .build()
+
+                client.newCall(httpRequest).execute().use { response ->
+                    val responseString = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "Gemini ($modelName) API error code: ${response.code}, body: $responseString")
+                        if (response.code == 429) {
+                            return@withContext Result.failure(RuntimeException("Rate limit reached. Please wait a moment and try again."))
+                        } else if (response.code == 401 || response.code == 403) {
+                            return@withContext Result.failure(RuntimeException("API authentication error. Please check your credentials."))
+                        }
+                        // Try next model if 404 or 5xx
+                        return@use
                     }
-                    // Fallback to offline engine
-                    return@withContext offlineFallback.analyzeAndGenerateReplies(request)
-                }
 
-                val jsonResponse = JSONObject(responseString)
-                val candidates = jsonResponse.optJSONArray("candidates")
-                val firstCandidate = candidates?.optJSONObject(0)
-                val content = firstCandidate?.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                val text = parts?.optJSONObject(0)?.optString("text")
+                    val jsonResponse = JSONObject(responseString)
+                    val candidates = jsonResponse.optJSONArray("candidates")
+                    val firstCandidate = candidates?.optJSONObject(0)
+                    val content = firstCandidate?.optJSONObject("content")
+                    val parts = content?.optJSONArray("parts")
 
-                if (text.isNullOrBlank()) {
-                    return@withContext offlineFallback.analyzeAndGenerateReplies(request)
-                }
+                    var text: String? = null
+                    if (parts != null) {
+                        for (p in 0 until parts.length()) {
+                            val partObj = parts.optJSONObject(p)
+                            val t = partObj?.optString("text")
+                            if (!t.isNullOrBlank() && (t.contains("\"replies\"") || t.trim().startsWith("{"))) {
+                                text = t
+                                break
+                            }
+                        }
+                        if (text == null && parts.length() > 0) {
+                            text = parts.optJSONObject(0)?.optString("text")
+                        }
+                    }
 
-                try {
+                    if (text.isNullOrBlank()) {
+                        return@use
+                    }
+
                     val cleanJson = text.trim()
                         .removePrefix("```json")
                         .removePrefix("```")
@@ -200,10 +210,10 @@ class GeminiSmartReplyProvider(
                         .trim()
 
                     val parsed = JSONObject(cleanJson)
-                    val detectedLang = parsed.optString("detectedLanguage", "English")
-                    val dominantLang = parsed.optString("dominantLanguage", "en")
+                    val detectedLang = parsed.optString("detectedLanguage", "Auto-detected")
+                    val dominantLang = parsed.optString("dominantLanguage", "auto")
                     val isCodeMixed = parsed.optBoolean("isCodeMixed", false)
-                    val detectedIntent = parsed.optString("detectedIntent", "general")
+                    val detectedIntent = parsed.optString("detectedIntent", "chat")
                     val rawRepliesArray = parsed.optJSONArray("replies") ?: JSONArray()
 
                     val suggestionList = mutableListOf<SmartReplySuggestion>()
@@ -211,17 +221,17 @@ class GeminiSmartReplyProvider(
                         val replyObj = rawRepliesArray.optJSONObject(i) ?: continue
                         val replyText = replyObj.optString("text", "").trim()
                         val tone = replyObj.optString("tone", effectiveStyle.displayName)
-                        val confidence = replyObj.optDouble("confidence", 0.9).toFloat()
+                        val confidence = replyObj.optDouble("confidence", 0.95).toFloat()
 
                         if (replyText.isNotBlank()) {
                             suggestionList.add(SmartReplySuggestion(replyText, tone, dominantLang, confidence))
                         }
                     }
 
-                    val filtered = SmartReplyQualityFilter.filterAndValidate(suggestionList, request.maxReplies)
+                    val filtered = SmartReplyQualityFilter.filterAndValidate(suggestionList, targetRepliesCount)
 
                     if (filtered.isNotEmpty()) {
-                        Result.success(
+                        return@withContext Result.success(
                             SmartReplyResponse(
                                 detectedLanguage = detectedLang,
                                 dominantLanguage = dominantLang,
@@ -231,23 +241,16 @@ class GeminiSmartReplyProvider(
                                 appliedStyle = effectiveStyle
                             )
                         )
-                    } else {
-                        offlineFallback.analyzeAndGenerateReplies(request)
                     }
-                } catch (pe: Exception) {
-                    Log.w(TAG, "Failed to parse structured JSON from Gemini: ${pe.message}")
-                    offlineFallback.analyzeAndGenerateReplies(request)
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Attempt with model $modelName failed: ${e.message}")
+                lastException = e
             }
-        } catch (te: SocketTimeoutException) {
-            Log.w(TAG, "Gemini request timed out: ${te.message}")
-            offlineFallback.analyzeAndGenerateReplies(request)
-        } catch (nhe: UnknownHostException) {
-            Log.w(TAG, "No network connection: ${nhe.message}")
-            Result.failure(IOException("No internet connection."))
-        } catch (e: Exception) {
-            Log.w(TAG, "Gemini execution exception: ${e.message}")
-            offlineFallback.analyzeAndGenerateReplies(request)
         }
+
+        // If network error or any failure occurred, fall back to offline provider so user still gets intelligent suggestions
+        Log.w(TAG, "Gemini online request did not succeed, falling back to offline smart reply engine")
+        return@withContext offlineFallback.analyzeAndGenerateReplies(request)
     }
 }

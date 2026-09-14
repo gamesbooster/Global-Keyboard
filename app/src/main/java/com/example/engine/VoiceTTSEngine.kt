@@ -28,7 +28,7 @@ class VoiceTTSEngine(context: Context) : TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             isInitialized = true
-            val indianEnglish = Locale("en", "IN")
+            val indianEnglish = Locale.forLanguageTag("en-IN")
             if (tts?.isLanguageAvailable(indianEnglish) ?: -1 >= TextToSpeech.LANG_AVAILABLE) {
                 tts?.language = indianEnglish
             } else {
@@ -119,7 +119,7 @@ class VoiceTTSEngine(context: Context) : TextToSpeech.OnInitListener {
                 val locale = Locale.forLanguageTag(languageTag)
                 val result = engine.setLanguage(locale)
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    val inLocale = Locale("en", "IN")
+                    val inLocale = Locale.forLanguageTag("en-IN")
                     if (engine.isLanguageAvailable(inLocale) >= TextToSpeech.LANG_AVAILABLE) {
                         engine.language = inLocale
                     } else {

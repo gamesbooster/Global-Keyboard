@@ -23,6 +23,14 @@ object AudioGuidanceHelper {
         }
     }
 
+    fun getLanguageStepAudioText(language: Language): String {
+        return when (language.code) {
+            "mr" -> "आपली मुख्य भाषा निवडा. तुम्ही भारतीय आणि जागतिक भाषांमधून निवड करू शकता."
+            "hi" -> "अपनी मुख्य भाषा चुनें। आप भारतीय और विश्व भाषाओं में से चुन सकते हैं।"
+            else -> "Choose your preferred primary typing and transliteration language."
+        }
+    }
+
     fun getPermissionsAudioText(language: Language): String {
         return when (language.code) {
             "mr" -> "कीबोर्ड प्रायव्हसी: अँड्रॉइड सुरक्षा अलर्ट प्रत्येक कीबोर्डसाठी येतो. तुमचे सर्व टायपिंग सुरक्षित आहे आणि डिव्हाइसवरच राहते."

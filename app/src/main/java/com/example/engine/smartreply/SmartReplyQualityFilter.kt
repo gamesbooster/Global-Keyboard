@@ -53,8 +53,8 @@ object SmartReplyQualityFilter {
             cleanList.add(candidate.copy(text = text))
         }
 
-        // Clamp to between 3 and 5 items
-        val targetCount = desiredCount.coerceIn(3, 5)
+        // Clamp to between 3 and 10 items (allowing users to explore up to 10 rich replies)
+        val targetCount = desiredCount.coerceIn(3, 10)
         return if (cleanList.size > targetCount) {
             cleanList.take(targetCount)
         } else {

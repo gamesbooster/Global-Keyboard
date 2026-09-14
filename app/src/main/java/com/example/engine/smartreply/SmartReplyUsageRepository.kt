@@ -32,15 +32,16 @@ class DefaultSmartReplyUsageRepository(
 
     override fun canGenerate(): Boolean {
         if (isPremium()) return true
-        return getUsageCount() < FREE_DAILY_QUOTA
+        return preferences.hasRemainingAiCredits()
     }
 
     override fun recordSuccessfulGeneration(): Boolean {
+        preferences.deductCreditsForSmartReply()
         return preferences.recordSmartReplyUsage()
     }
 
     override fun getRemainingGenerations(): Int {
         if (isPremium()) return Int.MAX_VALUE
-        return (FREE_DAILY_QUOTA - getUsageCount()).coerceAtLeast(0)
+        return preferences.aiCredits.value / 10
     }
 }

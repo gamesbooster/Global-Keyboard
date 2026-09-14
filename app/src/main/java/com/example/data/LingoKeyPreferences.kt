@@ -11,6 +11,13 @@ import kotlinx.coroutines.flow.asStateFlow
 class LingoKeyPreferences(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("lingokey_ai_prefs", Context.MODE_PRIVATE)
 
+    // Secure Credits & Earning Engine
+    val creditsManager = CreditsSecurityManager.getInstance(context)
+    val aiCredits = creditsManager.aiCredits
+    val spinsRemainingToday = creditsManager.spinsRemainingToday
+    val totalSpinsUsed = creditsManager.totalSpinsUsed
+    val isVaultTampered = creditsManager.isTampered
+
     // Keyboard Settings
     val autoCapitalization = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CAP, true))
     val autoCorrection = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CORRECT, true))
@@ -72,7 +79,7 @@ class LingoKeyPreferences(context: Context) {
     val smartReplyDefaultStyleId = MutableStateFlow(prefs.getString(KEY_SMART_REPLY_DEFAULT_STYLE, "smart_match") ?: "smart_match")
     val smartReplyDefaultTone = MutableStateFlow(prefs.getString(KEY_SMART_REPLY_DEFAULT_TONE, "AUTO") ?: "AUTO")
     val smartReplyLanguage = MutableStateFlow(prefs.getString(KEY_SMART_REPLY_LANG, "auto") ?: "auto")
-    val smartReplyMaxSuggestions = MutableStateFlow(prefs.getInt(KEY_SMART_REPLY_MAX_SUGGESTIONS, 4))
+    val smartReplyMaxSuggestions = MutableStateFlow(prefs.getInt(KEY_SMART_REPLY_MAX_SUGGESTIONS, 8))
     val smartReplyUsageCount = MutableStateFlow(prefs.getInt(KEY_SMART_REPLY_USAGE_COUNT, 0))
 
     private fun loadCurrentTheme(): KeyboardTheme {
@@ -245,6 +252,44 @@ class LingoKeyPreferences(context: Context) {
         prefs.edit().putBoolean(KEY_AUTO_DETECT_LANG, value).apply()
     }
 
+    // Theme Store & Unlocking System
+    val unlockedThemeIds = MutableStateFlow<Set<String>>(loadUnlockedThemeIds())
+
+    private fun loadUnlockedThemeIds(): Set<String> {
+        val saved = prefs.getStringSet("unlocked_themes_set", null)
+        return saved ?: setOf("spain_2", "spain_4", "spain_3", "minimal_light", "emerald", "midnight")
+    }
+
+    fun unlockThemeWithCredits(themeId: String, cost: Int): Boolean {
+        if (isPremiumUser.value) {
+            markThemeUnlocked(themeId)
+            return true
+        }
+        val success = creditsManager.deductCredits(cost, false)
+        if (success) {
+            markThemeUnlocked(themeId)
+            return true
+        }
+        return false
+    }
+
+    fun unlockThemeFree(themeId: String) {
+        markThemeUnlocked(themeId)
+    }
+
+    fun markThemeUnlocked(themeId: String) {
+        val set = unlockedThemeIds.value.toMutableSet()
+        set.add(themeId)
+        unlockedThemeIds.value = set
+        prefs.edit().putStringSet("unlocked_themes_set", set).apply()
+    }
+
+    fun isThemeUnlocked(themeId: String, isFree: Boolean = false): Boolean {
+        if (isFree) return true
+        if (isPremiumUser.value) return true
+        return unlockedThemeIds.value.contains(themeId)
+    }
+
     fun setRealtimeAutoTranslate(value: Boolean) {
         realtimeAutoTranslate.value = value
         prefs.edit().putBoolean(KEY_REALTIME_AUTO_TRANSLATE, value).apply()
@@ -362,17 +407,49 @@ class LingoKeyPreferences(context: Context) {
         return tone != ToneType.CONFIDENT && tone != ToneType.FUNNY
     }
 
-    fun recordAiUsage(): Boolean {
+    fun recordAiUsage(cost: Int = CreditsSecurityManager.COST_PER_AI_GENERATION): Boolean {
         if (isPremiumUser.value) return true
-        val current = aiUsageCount.value + 1
-        aiUsageCount.value = current
-        prefs.edit().putInt(KEY_AI_USAGE_COUNT, current).apply()
-        return current <= 10 // 10 free AI generations for free tier
+        val deducted = creditsManager.deductCredits(cost, false)
+        if (deducted) {
+            val current = aiUsageCount.value + 1
+            aiUsageCount.value = current
+            prefs.edit().putInt(KEY_AI_USAGE_COUNT, current).apply()
+            return true
+        }
+        return false
     }
 
-    fun hasRemainingAiCredits(): Boolean {
+    fun hasRemainingAiCredits(cost: Int = CreditsSecurityManager.COST_PER_AI_GENERATION): Boolean {
         if (isPremiumUser.value) return true
-        return aiUsageCount.value < 10
+        return creditsManager.hasCredits(cost, false)
+    }
+
+    fun consumeSpin(): Boolean {
+        return creditsManager.consumeSpin()
+    }
+
+    fun addCredits(amount: Int): Boolean {
+        return creditsManager.addCredits(amount)
+    }
+
+    fun recordSpinResult(creditsWon: Int): Boolean {
+        return creditsManager.recordSpinResult(creditsWon)
+    }
+
+    fun recordRewardedAdClaim(
+        rewardCredits: Int = CreditsSecurityManager.REWARDED_AD_CREDITS,
+        bonusSpins: Int = 0,
+        elapsedWatchSeconds: Int = CreditsSecurityManager.MINIMUM_WATCH_SECONDS
+    ): Boolean {
+        return creditsManager.recordRewardedAdClaim(rewardCredits, bonusSpins, elapsedWatchSeconds)
+    }
+
+    fun canSpin(): Boolean {
+        return creditsManager.canSpin()
+    }
+
+    fun deductCreditsForSmartReply(cost: Int = CreditsSecurityManager.COST_PER_AI_GENERATION): Boolean {
+        return creditsManager.deductCredits(cost, isPremiumUser.value)
     }
 
     fun setSmartReplyEnabled(enabled: Boolean) {
@@ -396,7 +473,7 @@ class LingoKeyPreferences(context: Context) {
     }
 
     fun setSmartReplyMaxSuggestions(max: Int) {
-        val clamped = max.coerceIn(3, 5)
+        val clamped = max.coerceIn(3, 10)
         smartReplyMaxSuggestions.value = clamped
         prefs.edit().putInt(KEY_SMART_REPLY_MAX_SUGGESTIONS, clamped).apply()
     }

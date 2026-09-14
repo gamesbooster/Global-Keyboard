@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.KeyboardTheme
@@ -49,7 +50,8 @@ fun ToolsPanel(
     onOpenThemes: () -> Unit,
     onOpenLanguages: () -> Unit,
     onOpenSettings: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    panelHeight: Dp = 268.dp
 ) {
     val toolItems = listOf(
         ToolItem(
@@ -95,8 +97,8 @@ fun ToolsPanel(
         ),
         ToolItem(
             id = "themes",
-            title = "🎨 Themes",
-            subtitle = "AMOLED, velvet & dynamic styles",
+            title = "🎨 Themes & Styles",
+            subtitle = "3D, Glass, Neumorphic, Translucent & 10 Master Themes",
             icon = Icons.Default.Palette,
             accentColor = Color(0xFF8B5CF6),
             onClick = onOpenThemes
@@ -122,7 +124,7 @@ fun ToolsPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(268.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(horizontal = 8.dp, vertical = 6.dp)
     ) {

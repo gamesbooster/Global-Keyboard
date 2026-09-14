@@ -1,10 +1,12 @@
 package com.example.ui.screens
 
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,17 +23,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -41,6 +52,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.data.ClipboardRepository
 import com.example.data.LingoKeyPreferences
 import com.example.engine.*
+import com.example.ui.components.*
 import com.example.model.KeyboardTheme
 import com.example.model.Language
 import kotlinx.coroutines.launch
@@ -56,7 +68,9 @@ fun DashboardScreen(
     onNavigateToPrivacy: () -> Unit,
     onNavigateToPro: () -> Unit,
     onRestartOnboarding: () -> Unit,
-    onNavigateToSmartReply: () -> Unit = {}
+    onNavigateToSmartReply: () -> Unit = {},
+    onNavigateToSpinAndWin: () -> Unit = {},
+    onNavigateToStore: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -74,18 +88,20 @@ fun DashboardScreen(
     val autoCorrection by preferences.autoCorrection.collectAsState()
     val autoCapitalization by preferences.autoCapitalization.collectAsState()
 
-    // Mode and Entitlements
+    // Mode, Entitlements and Credits
     val isDarkMode by preferences.isDarkMode.collectAsState()
     val isPremiumUser by preferences.isPremiumUser.collectAsState()
+    val aiCredits by preferences.aiCredits.collectAsState()
+    val spinsRemainingToday by preferences.spinsRemainingToday.collectAsState()
 
-    // Dynamic Color Palette for Light (White) Mode & Dark Mode
-    val bgColor = if (isDarkMode) Color(0xFF0F1016) else Color(0xFFF8FAFC)
-    val cardBg = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    val cardSubtleBg = if (isDarkMode) Color(0xFF222433) else Color(0xFFF1F5F9)
-    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val borderColor = if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
-    val navBarBg = if (isDarkMode) Color(0xFF161722) else Color(0xFFFFFFFF)
+    // Authentic 3D Neumorphism Color Palette (Matching Sample Images in Light Mode & Dark Mode)
+    val bgColor = if (isDarkMode) NeumorphicColors.DarkScreenBg else NeumorphicColors.LightScreenBg
+    val cardBg = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+    val cardSubtleBg = if (isDarkMode) NeumorphicColors.DarkWellTop else NeumorphicColors.LightWellTop
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+    val borderColor = if (isDarkMode) Color(0x33FFFFFF) else Color(0x28000000)
+    val navBarBg = if (isDarkMode) NeumorphicColors.DarkScreenBg else NeumorphicColors.LightScreenBg
 
     // Dynamic IME check
     var isImeEnabled by remember { mutableStateOf(ImeUtils.isKeyboardEnabled(context)) }
@@ -110,111 +126,134 @@ fun DashboardScreen(
     Scaffold(
         containerColor = bgColor,
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(end = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Left: Logo & App Name
+            Surface(
+                color = cardBg,
+                shadowElevation = 6.dp,
+                shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (isDarkMode) Color.White.copy(alpha = 0.12f) else Color(0x28000000)
+                )
+            ) {
+                TopAppBar(
+                    title = {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(end = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(Color(0xFF059669), Color(0xFF10B981))
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
+                            // Left: 3D Embossed Logo & App Name
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text(
-                                    "म",
-                                    color = Color.White,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                            Column {
-                                Text(
-                                    "Global Keyboard Dynamic",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = textColor
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    shadowElevation = 4.dp,
+                                    border = BorderStroke(1.2.dp, Color(0x6610B981)),
+                                    modifier = Modifier.size(38.dp)
                                 ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(Color(0xFF059669), Color(0xFF10B981), Color(0xFF34D399))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "म",
+                                            color = Color.White,
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                                Column {
                                     Text(
-                                        "${activeLanguage.displayName} • Active",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF10B981)
+                                        "Global Keyboard Dynamic",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.5.sp,
+                                        color = textColor
                                     )
-                                    if (isPremiumUser) {
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = Color(0xFFF59E0B).copy(alpha = 0.2f)
-                                        ) {
-                                            Text(
-                                                "VIP",
-                                                color = Color(0xFFF59E0B),
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF10B981))
+                                        )
+                                        Text(
+                                            "${activeLanguage.displayName} • Active",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF10B981)
+                                        )
+                                        if (isPremiumUser) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFFF59E0B).copy(alpha = 0.2f)
+                                            ) {
+                                                Text(
+                                                    "VIP",
+                                                    color = Color(0xFFF59E0B),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
+
+                            // Right Corner Icons (Light/Dark Mode toggle, VIP Crown, Help)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                // 1. Normal White / Dark Mode Toggle Icon
+                                IconButton(onClick = { preferences.toggleDarkMode() }) {
+                                    Icon(
+                                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                        contentDescription = if (isDarkMode) "Switch to Light Mode" else "Switch to Dark Mode",
+                                        tint = if (isDarkMode) Color(0xFFFBBF24) else Color(0xFF059669),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                // 2. VIP / In-App Purchase Icon
+                                IconButton(onClick = onNavigateToPro) {
+                                    Icon(
+                                        imageVector = Icons.Default.WorkspacePremium,
+                                        contentDescription = "VIP / PRO Upgrades",
+                                        tint = if (isPremiumUser) Color(0xFFF59E0B) else Color(0xFF10B981),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                // 3. Help / Tutorial Icon
+                                IconButton(onClick = { showHelpDialog = true }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.HelpOutline,
+                                        contentDescription = "Help & Tutorial",
+                                        tint = textMuted,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
                         }
-
-                        // Right Corner Icons (Light/Dark Mode toggle, VIP Crown, Help)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            // 1. Normal White / Dark Mode Toggle Icon
-                            IconButton(onClick = { preferences.toggleDarkMode() }) {
-                                Icon(
-                                    imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = if (isDarkMode) "Switch to Light Mode" else "Switch to Dark Mode",
-                                    tint = if (isDarkMode) Color(0xFFFBBF24) else Color(0xFF059669),
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-
-                            // 2. VIP / In-App Purchase Icon
-                            IconButton(onClick = onNavigateToPro) {
-                                Icon(
-                                    imageVector = Icons.Default.WorkspacePremium,
-                                    contentDescription = "VIP / PRO Upgrades",
-                                    tint = if (isPremiumUser) Color(0xFFF59E0B) else Color(0xFF10B981),
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-
-                            // 3. Help / Tutorial Icon
-                            IconButton(onClick = { showHelpDialog = true }) {
-                                Icon(
-                                    Icons.Default.HelpOutline,
-                                    contentDescription = "Help & Tutorial",
-                                    tint = textMuted,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = bgColor)
-            )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                )
+            }
         },
         bottomBar = {
             NavigationBar(
@@ -281,11 +320,14 @@ fun DashboardScreen(
                     isPremiumUser = isPremiumUser,
                     onSelectTypingStyle = { preferences.setTypingStyle(it) },
                     onNavigateToLanguages = onNavigateToLanguages,
+                    onNavigateToThemes = onNavigateToThemes,
                     onNavigateToVoiceSettings = onNavigateToVoiceSettings,
                     onNavigateToAISettings = onNavigateToAISettings,
                     onNavigateToSmartReply = onNavigateToSmartReply,
                     onNavigateToPro = onNavigateToPro,
-                    onRestartOnboarding = onRestartOnboarding
+                    onRestartOnboarding = onRestartOnboarding,
+                    onNavigateToSpinAndWin = onNavigateToSpinAndWin,
+                    onNavigateToStore = onNavigateToStore
                 )
                 1 -> ThemesTab(
                     preferences = preferences,
@@ -317,7 +359,8 @@ fun DashboardScreen(
                     onNavigateToSmartReply = onNavigateToSmartReply,
                     onNavigateToPrivacy = onNavigateToPrivacy,
                     onNavigateToPro = onNavigateToPro,
-                    onRestartOnboarding = onRestartOnboarding
+                    onRestartOnboarding = onRestartOnboarding,
+                    onNavigateToSpinAndWin = onNavigateToSpinAndWin
                 )
             }
         }
@@ -366,32 +409,23 @@ fun LayoutsTab(
     isPremiumUser: Boolean,
     onSelectTypingStyle: (String) -> Unit,
     onNavigateToLanguages: () -> Unit,
+    onNavigateToThemes: () -> Unit,
     onNavigateToVoiceSettings: () -> Unit,
     onNavigateToAISettings: () -> Unit,
     onNavigateToSmartReply: () -> Unit,
     onNavigateToPro: () -> Unit,
-    onRestartOnboarding: () -> Unit
+    onRestartOnboarding: () -> Unit,
+    onNavigateToSpinAndWin: () -> Unit = {},
+    onNavigateToStore: () -> Unit = {}
 ) {
-    var testInput by remember { mutableStateOf("") }
-    var transliteratedPreview by remember { mutableStateOf("") }
+    val aiCredits by preferences.aiCredits.collectAsState()
+    val spinsRemainingToday by preferences.spinsRemainingToday.collectAsState()
 
-    val cardBg = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    val cardSubtleBg = if (isDarkMode) Color(0xFF222433) else Color(0xFFF1F5F9)
+    var showCustomizeDialog by remember { mutableStateOf(false) }
+    var showClipboardDialog by remember { mutableStateOf(false) }
+
     val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val borderColor = if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
-
-    LaunchedEffect(testInput, currentTypingStyle) {
-        if (currentTypingStyle == "transliteration" && testInput.isNotBlank()) {
-            val words = testInput.split(" ")
-            val converted = words.map { word ->
-                if (word.isBlank()) "" else TransliteratorEngine.transliterate(word, activeLanguage.id)
-            }
-            transliteratedPreview = converted.joinToString(" ")
-        } else {
-            transliteratedPreview = testInput
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -400,31 +434,31 @@ fun LayoutsTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. IME Status Banner
+        // 1. Sleek Compact IME Status Banner (Reduced Height)
         if (!isImeEnabled || !isImeSelected) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = if (isDarkMode) Color(0xFF451A03) else Color(0xFFFFFBEB)),
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isDarkMode) Color(0xFF3B1A03) else Color(0xFFFFFBEB),
                 border = BorderStroke(1.dp, Color(0xFFF59E0B)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B))
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(18.dp))
                         Column {
-                            Text("Keyboard Not Active", fontWeight = FontWeight.Bold, color = if (isDarkMode) Color.White else Color(0xFF92400E), fontSize = 13.sp)
+                            Text("Keyboard Not Active", fontWeight = FontWeight.Bold, color = if (isDarkMode) Color.White else Color(0xFF92400E), fontSize = 12.5.sp)
                             Text(
                                 if (!isImeEnabled) "Enable in Android settings" else "Select Global Keyboard as active",
                                 color = if (isDarkMode) Color(0xFFFDE68A) else Color(0xFFB45309),
-                                fontSize = 11.sp
+                                fontSize = 10.5.sp
                             )
                         }
                     }
@@ -439,18 +473,20 @@ fun LayoutsTab(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
                         shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
                     ) {
-                        Text(if (!isImeEnabled) "Enable" else "Select", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(if (!isImeEnabled) "Enable" else "Select", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
                     }
                 }
             }
         } else {
-            // Active Verification Pill
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isDarkMode) Color(0xFF064E3B).copy(alpha = 0.6f) else Color(0xFFECFDF5),
-                border = BorderStroke(1.dp, Color(0xFF059669))
+            // Active Verification Pill (3D Neumorphic Compact Card)
+            NeumorphicCard(
+                isDarkMode = isDarkMode,
+                cornerRadius = 14.dp,
+                elevation = 5.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
@@ -459,18 +495,269 @@ fun LayoutsTab(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(NeumorphicColors.EmeraldAccent.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = NeumorphicColors.EmeraldAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     Text(
                         "Global Keyboard Dynamic is active & ready in all apps",
-                        color = if (isDarkMode) Color(0xFFECFDF5) else Color(0xFF065F46),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        color = textColor,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
         }
 
-        // 2. VIP In-App Purchase Banner
+        // 2. Feature Cards (Matching image.png layout, styling, text, and icons)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Row 1: Languages & Voice & Audio (Exact matches from image.png)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                DashboardFeatureCard(
+                    icon = Icons.Default.Translate,
+                    title = "Languages",
+                    desc = "${activeLanguage.displayName} (15+ Available)",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToLanguages,
+                    modifier = Modifier.weight(1f)
+                )
+                DashboardFeatureCard(
+                    icon = Icons.Default.Mic,
+                    title = "Voice & Audio",
+                    desc = "TTS & Dictation Engine",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToVoiceSettings,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Row 2: AI Writing & VIP Store (Exact matches from image.png)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                DashboardFeatureCard(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "AI Writing",
+                    desc = "Tone, Grammar & Rewrites",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToAISettings,
+                    modifier = Modifier.weight(1f)
+                )
+                DashboardFeatureCard(
+                    icon = Icons.Default.WorkspacePremium,
+                    title = "VIP Store",
+                    desc = "Unlock All Features",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToPro,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Row 3: Theme Store & Customize
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                DashboardFeatureCard(
+                    icon = Icons.Default.Palette,
+                    title = "Theme Store",
+                    desc = "World Cup & 3D Themes",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToStore,
+                    modifier = Modifier.weight(1f)
+                )
+                DashboardFeatureCard(
+                    icon = Icons.Default.Tune,
+                    title = "Customize",
+                    desc = "Vibration, Sound & Size",
+                    isDarkMode = isDarkMode,
+                    onClick = { showCustomizeDialog = true },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Row 4: ✨ Smart Reply (Full width card matching image.png bottom)
+            DashboardFeatureCard(
+                icon = Icons.Default.AutoAwesome,
+                title = "✨ Smart Reply",
+                desc = "Contextual suggestions for messages",
+                isDarkMode = isDarkMode,
+                onClick = onNavigateToSmartReply,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // 3. Real Google AdMob Live Banner (Official Google Test Ad Unit - Real-time loading)
+        RealAdMobBanner(isDarkMode = isDarkMode)
+
+        // 4. Spin & Win Free AI Credits Card (3D Neumorphic Physical Wheel Card)
+        val spinTextColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+        val spinTextMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+        val wheelWellBrush = if (isDarkMode) {
+            Brush.linearGradient(
+                colors = listOf(NeumorphicColors.DarkWellTop, NeumorphicColors.DarkWellBottom),
+                start = Offset(0f, 0f),
+                end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+            )
+        } else {
+            Brush.linearGradient(
+                colors = listOf(NeumorphicColors.LightWellTop, NeumorphicColors.LightWellBottom),
+                start = Offset(0f, 0f),
+                end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+            )
+        }
+
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
+            isDarkMode = isDarkMode,
+            cornerRadius = 18.dp,
+            elevation = 7.dp,
+            onClick = onNavigateToSpinAndWin
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // 3D Recessed Wheel Graphic
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(wheelWellBrush),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.size(40.dp)) {
+                                val radius = size.minDimension / 2f
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val slices = 8
+                                val sliceSweep = 360f / slices
+
+                                for (i in 0 until slices) {
+                                    drawArc(
+                                        color = if (i % 2 == 0) NeumorphicColors.EmeraldAccent else NeumorphicColors.EmeraldAccent.copy(alpha = 0.45f),
+                                        startAngle = i * sliceSweep,
+                                        sweepAngle = sliceSweep,
+                                        useCenter = true,
+                                        topLeft = Offset(center.x - radius, center.y - radius),
+                                        size = Size(radius * 2, radius * 2)
+                                    )
+                                }
+                                drawCircle(
+                                    color = Color(0xFFF59E0B),
+                                    radius = radius,
+                                    center = center,
+                                    style = Stroke(width = 2f)
+                                )
+                                drawCircle(
+                                    color = if (isDarkMode) Color(0xFF1E202E) else Color(0xFFE2E8F0),
+                                    radius = 7f,
+                                    center = center
+                                )
+                                drawCircle(
+                                    color = Color(0xFFF59E0B),
+                                    radius = 3f,
+                                    center = center
+                                )
+                            }
+                            // Mini top indicator pointer
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = (-2).dp)
+                            ) {
+                                Text("▼", color = Color(0xFFF59E0B), fontSize = 9.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                "Spin & Win",
+                                fontWeight = FontWeight.Bold,
+                                color = spinTextColor,
+                                fontSize = 14.sp
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    if (isPremiumUser) "🪙 Unlimited (VIP)" else "🪙 $aiCredits Credits",
+                                    color = Color(0xFFF59E0B),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "• $spinsRemainingToday/5 spins left",
+                                    color = spinTextMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // 3D Neumorphic Style Action Button
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFF59E0B),
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.clickable { onNavigateToSpinAndWin() }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.RotateRight,
+                                contentDescription = null,
+                                tint = Color(0xFF0F172A),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                "SPIN",
+                                color = Color(0xFF0F172A),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. VIP In-App Purchase Banner (Upgrade to PRO)
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
@@ -555,282 +842,31 @@ fun LayoutsTab(
                 )
             }
         }
+    }
 
-        // 3. Choose Your Typing Style Section
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "Choose your typing style",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = textColor
-            )
+    if (showCustomizeDialog) {
+        CustomizeKeyboardDialog(
+            preferences = preferences,
+            isDarkMode = isDarkMode,
+            onDismiss = { showCustomizeDialog = false }
+        )
+    }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                TypingStyleCard(
-                    title = "abc → ${activeLanguage.nativeName}",
-                    subtitle = "amhi → आम्ही",
-                    isSelected = currentTypingStyle == "transliteration",
-                    isDarkMode = isDarkMode,
-                    onClick = { onSelectTypingStyle("transliteration") },
-                    modifier = Modifier.weight(1f)
-                )
-                TypingStyleCard(
-                    title = "English",
-                    subtitle = "qwerty",
-                    isSelected = currentTypingStyle == "english",
-                    isDarkMode = isDarkMode,
-                    onClick = { onSelectTypingStyle("english") },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                TypingStyleCard(
-                    title = "अक्षर Akshar",
-                    subtitle = "अ आ इ ई / क ख",
-                    isSelected = currentTypingStyle == "akshar",
-                    isDarkMode = isDarkMode,
-                    onClick = { onSelectTypingStyle("akshar") },
-                    modifier = Modifier.weight(1f)
-                )
-                TypingStyleCard(
-                    title = "Voice Typing",
-                    subtitle = "Speak to type 🎙️",
-                    isSelected = currentTypingStyle == "voice",
-                    isDarkMode = isDarkMode,
-                    onClick = { onSelectTypingStyle("voice") },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // 4. Interactive Test Typing Box
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = cardBg),
-            border = BorderStroke(1.dp, borderColor),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Try typing here...", fontWeight = FontWeight.Bold, color = textColor, fontSize = 13.sp)
-                    if (testInput.isNotBlank()) {
-                        TextButton(
-                            onClick = { testInput = "" },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text("Clear", color = textMuted, fontSize = 11.sp)
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = testInput,
-                    onValueChange = { testInput = it },
-                    placeholder = { Text("Tap to type with Global Keyboard...", color = textMuted, fontSize = 13.sp) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF10B981),
-                        unfocusedBorderColor = borderColor,
-                        focusedTextColor = textColor,
-                        unfocusedTextColor = textColor,
-                        focusedContainerColor = cardSubtleBg,
-                        unfocusedContainerColor = cardSubtleBg
-                    )
-                )
-
-                if (currentTypingStyle == "transliteration" && transliteratedPreview.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isDarkMode) Color(0xFF064E3B).copy(alpha = 0.5f) else Color(0xFFECFDF5),
-                        border = BorderStroke(1.dp, Color(0xFF059669).copy(alpha = 0.4f))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text("Transliterated Output:", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(transliteratedPreview, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                // Sample test chips
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf("namaste", "amhi", "dhanyawad", "kasa ahes", "shubh ratri").forEach { sample ->
-                        Surface(
-                            onClick = { testInput = sample },
-                            shape = RoundedCornerShape(14.dp),
-                            color = cardSubtleBg,
-                            border = BorderStroke(0.5.dp, borderColor)
-                        ) {
-                            Text(
-                                sample,
-                                color = textColor,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Spacebar gesture tip
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Default.Swipe, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
-                    Text(
-                        "Spacebar gesture: Drag left/right to move cursor smoothly",
-                        color = textMuted,
-                        fontSize = 11.sp
-                    )
-                }
-            }
-        }
-
-        // 5. Quick Tools & Utilities
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Quick Tools", fontWeight = FontWeight.Bold, color = textColor, fontSize = 15.sp)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                QuickToolCard(
-                    icon = Icons.Default.Translate,
-                    title = "Languages",
-                    desc = "${activeLanguage.displayName} (15+ Available)",
-                    isDarkMode = isDarkMode,
-                    onClick = onNavigateToLanguages,
-                    modifier = Modifier.weight(1f)
-                )
-                QuickToolCard(
-                    icon = Icons.Default.Mic,
-                    title = "Voice & Audio",
-                    desc = "TTS & Dictation Engine",
-                    isDarkMode = isDarkMode,
-                    onClick = onNavigateToVoiceSettings,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                QuickToolCard(
-                    icon = Icons.Default.AutoAwesome,
-                    title = "AI Writing",
-                    desc = "Tone, Grammar & Rewrites",
-                    isDarkMode = isDarkMode,
-                    onClick = onNavigateToAISettings,
-                    modifier = Modifier.weight(1f)
-                )
-                QuickToolCard(
-                    icon = Icons.Default.WorkspacePremium,
-                    title = "VIP Store",
-                    desc = if (isPremiumUser) "PRO Active" else "Unlock All Features",
-                    isDarkMode = isDarkMode,
-                    onClick = onNavigateToPro,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // Row 3: Smart Reply Studio
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                QuickToolCard(
-                    icon = Icons.Default.AutoAwesome,
-                    title = "✨ Smart Reply",
-                    desc = "Contextual suggestions for messages",
-                    isDarkMode = isDarkMode,
-                    onClick = onNavigateToSmartReply,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
+    if (showClipboardDialog) {
+        ClipboardManagerDialog(
+            context = context,
+            isDarkMode = isDarkMode,
+            onDismiss = { showClipboardDialog = false }
+        )
     }
 }
 
+/**
+ * 3D Real Neumorphic Dashboard Feature Card.
+ * Maintains EXACT size and dimensions as requested, with full 3D Neumorphic cuts, dual shadows, and color styling.
+ */
 @Composable
-fun TypingStyleCard(
-    title: String,
-    subtitle: String,
-    isSelected: Boolean,
-    isDarkMode: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val containerColor = if (isSelected) {
-        if (isDarkMode) Color(0xFF064E3B) else Color(0xFFECFDF5)
-    } else {
-        if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    }
-    val borderColor = if (isSelected) Color(0xFF10B981) else if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
-    val titleColor = if (isSelected) {
-        if (isDarkMode) Color.White else Color(0xFF065F46)
-    } else {
-        if (isDarkMode) Color.White else Color(0xFF0F172A)
-    }
-    val subtitleColor = if (isSelected) {
-        if (isDarkMode) Color(0xFF6EE7B7) else Color(0xFF059669)
-    } else {
-        if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    }
-
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-        border = BorderStroke(if (isSelected) 2.dp else 1.dp, borderColor),
-        modifier = modifier.clickable { onClick() }
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    title,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = titleColor
-                )
-                if (isSelected) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                subtitle,
-                fontSize = 11.sp,
-                color = subtitleColor
-            )
-        }
-    }
-}
-
-@Composable
-fun QuickToolCard(
+fun DashboardFeatureCard(
     icon: ImageVector,
     title: String,
     desc: String,
@@ -838,37 +874,155 @@ fun QuickToolCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardBg = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    val borderColor = if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
-    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    NeumorphicFeatureCard(
+        icon = icon,
+        title = title,
+        desc = desc,
+        isDarkMode = isDarkMode,
+        onClick = onClick,
+        modifier = modifier
+    )
+}
 
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = cardBg),
-        border = BorderStroke(1.dp, borderColor),
-        modifier = modifier.clickable { onClick() }
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
+@Composable
+fun CustomizeKeyboardDialog(
+    preferences: LingoKeyPreferences,
+    isDarkMode: Boolean,
+    onDismiss: () -> Unit
+) {
+    val keyVibration by preferences.keyVibration.collectAsState()
+    val keySound by preferences.keySound.collectAsState()
+    val showKeyBorders by preferences.showKeyBorders.collectAsState()
+    val keyHeightDp by preferences.keyHeightDp.collectAsState()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Customize Keyboard", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Vibration Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Key Vibration", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    Switch(
+                        checked = keyVibration,
+                        onCheckedChange = { preferences.setKeyVibration(it) }
+                    )
+                }
+
+                // Sound Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Key Sound", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    Switch(
+                        checked = keySound,
+                        onCheckedChange = { preferences.setKeySound(it) }
+                    )
+                }
+
+                // Key Borders Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Show Key Borders", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    Switch(
+                        checked = showKeyBorders,
+                        onCheckedChange = { preferences.setShowKeyBorders(it) }
+                    )
+                }
+
+                // Key Height Slider
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Keyboard Height", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                        Text("${keyHeightDp}dp", fontWeight = FontWeight.Bold, color = Color(0xFF10B981), fontSize = 13.sp)
+                    }
+                    Slider(
+                        value = keyHeightDp.toFloat(),
+                        onValueChange = { preferences.setKeyHeightDp(it.toInt()) },
+                        valueRange = 40f..64f
+                    )
+                }
             }
-            Column {
-                Text(title, fontWeight = FontWeight.Bold, color = textColor, fontSize = 12.sp)
-                Text(desc, fontSize = 10.sp, color = textMuted, maxLines = 1)
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+            ) {
+                Text("Done", color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
-    }
+    )
+}
+
+@Composable
+fun ClipboardManagerDialog(
+    context: Context,
+    isDarkMode: Boolean,
+    onDismiss: () -> Unit
+) {
+    val sampleSnippets = listOf(
+        "Hello! How are you doing today?",
+        "Thank you so much for your help!",
+        "I'm on my way, see you soon.",
+        "Can we talk a bit later?",
+        "धन्यवाद / शुक्रिया!"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Clipboard & Quick Snippets", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Tap any quick snippet to copy to your clipboard:", fontSize = 12.5.sp)
+                sampleSnippets.forEach { snippet ->
+                    Surface(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("Snippet", snippet)
+                            clipboard?.setPrimaryClip(clip)
+                            Toast.makeText(context, "Copied: $snippet", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isDarkMode) Color(0xFF222433) else Color(0xFFF1F5F9),
+                        border = BorderStroke(0.5.dp, if (isDarkMode) Color(0xFF33364D) else Color(0xFFCBD5E1)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(snippet, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(16.dp), tint = Color(0xFF10B981))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -1094,10 +1248,19 @@ fun SettingsTab(
     onNavigateToSmartReply: () -> Unit,
     onNavigateToPrivacy: () -> Unit,
     onNavigateToPro: () -> Unit,
-    onRestartOnboarding: () -> Unit
+    onRestartOnboarding: () -> Unit,
+    onNavigateToSpinAndWin: () -> Unit = {}
 ) {
-    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val context = LocalContext.current
+    var showHeightDialog by remember { mutableStateOf(false) }
+    var showSoundVibrationDialog by remember { mutableStateOf(false) }
+    var showEmojiNumbersDialog by remember { mutableStateOf(false) }
+    var showTypingDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+    val dividerColor = if (isDarkMode) Color(0x18FFFFFF) else Color(0x12000000)
 
     Column(
         modifier = Modifier
@@ -1106,246 +1269,802 @@ fun SettingsTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Section: In-App Purchase & VIP Membership
-        SettingsSectionHeader("In-App Purchase & Membership")
-        SettingsRowItem(
-            icon = Icons.Default.WorkspacePremium,
-            title = if (isPremiumUser) "VIP Membership (Active)" else "Upgrade to PRO VIP",
-            subtitle = if (isPremiumUser) "All 15+ VIP themes, unlimited AI & HD voices unlocked"
-            else "Unlock all luxury themes, unlimited AI and studio voices",
+        // Top 3D Neumorphic Header Card: Status & Theme Mode Switcher
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
             isDarkMode = isDarkMode,
-            onClick = onNavigateToPro
-        )
+            cornerRadius = 18.dp,
+            elevation = 7.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    // Recessed 3D Well with App Glyph
+                    val wellBrush = if (isDarkMode) {
+                        Brush.linearGradient(listOf(NeumorphicColors.DarkWellTop, NeumorphicColors.DarkWellBottom))
+                    } else {
+                        Brush.linearGradient(listOf(NeumorphicColors.LightWellTop, NeumorphicColors.LightWellBottom))
+                    }
+                    val wellBorder = if (isDarkMode) {
+                        BorderStroke(1.dp, Brush.linearGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.White.copy(alpha = 0.10f))))
+                    } else {
+                        BorderStroke(1.dp, Brush.linearGradient(listOf(Color(0x2A000000), Color.White.copy(alpha = 0.85f))))
+                    }
 
-        // Section: Appearance & Layout
-        SettingsSectionHeader("Appearance & Mode")
-        // White Mode / Dark Mode Toggle
-        SettingsToggleItem(
-            icon = if (isDarkMode) Icons.Default.DarkMode else Icons.Default.LightMode,
-            title = if (isDarkMode) "Dark Mode (Active)" else "Normal White / Light Mode (Active)",
-            subtitle = "Toggle between clean white theme and dark theme",
-            checked = isDarkMode,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setDarkMode(it) }
-        )
-        SettingsRowItem(
-            icon = Icons.Default.Palette,
-            title = "Themes & Colors",
-            subtitle = "Custom backgrounds, key borders, and palettes",
-            isDarkMode = isDarkMode,
-            onClick = onNavigateToThemes
-        )
-        SettingsToggleItem(
-            icon = Icons.Default.Pin,
-            title = "Number Row",
-            subtitle = "Show dedicated numbers 1-0 above letter keys",
-            checked = showNumberRow,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setShowNumberRow(it) }
-        )
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(wellBrush)
+                            .border(wellBorder, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Keyboard,
+                            contentDescription = null,
+                            tint = NeumorphicColors.EmeraldAccent,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
 
-        // Section: Typing & Input
-        SettingsSectionHeader("Typing & Language")
-        SettingsRowItem(
-            icon = Icons.Default.Language,
-            title = "Languages",
-            subtitle = "Active: ${activeLanguage.displayName} (${activeLanguage.nativeName})",
-            isDarkMode = isDarkMode,
-            onClick = onNavigateToLanguages
-        )
-        SettingsToggleItem(
-            icon = Icons.Default.Translate,
-            title = "Phonetic Transliteration",
-            subtitle = "Convert Hinglish/English typing to Indic script",
-            checked = transliterationEnabled,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setTransliterationEnabled(it) }
-        )
-        SettingsToggleItem(
-            icon = Icons.Default.EmojiEmotions,
-            title = "Contextual Emoji Suggestions",
-            subtitle = "Suggest relevant emojis as you type words",
-            checked = emojiSuggestionsEnabled,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setEmojiSuggestionsEnabled(it) }
-        )
-        SettingsToggleItem(
-            icon = Icons.Default.Spellcheck,
-            title = "Auto-Correction",
-            subtitle = "Correct typos automatically upon spacebar",
-            checked = autoCorrection,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setAutoCorrection(it) }
-        )
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Global Keyboard", fontWeight = FontWeight.Bold, color = textColor, fontSize = 14.sp)
+                            if (isPremiumUser) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFF59E0B)
+                                ) {
+                                    Text("VIP", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                }
+                            }
+                        }
+                        Text(
+                            "Language: ${activeLanguage.displayName} • v2.5.0",
+                            fontSize = 11.5.sp,
+                            color = textMuted
+                        )
+                    }
+                }
 
-        // Section: AI & Smart Tools
-        SettingsSectionHeader("AI & Smart Tools")
-        SettingsRowItem(
-            icon = Icons.Default.AutoAwesome,
-            title = "✨ Smart Reply Settings",
-            subtitle = "Contextual replies, default tones & interactive tester",
-            isDarkMode = isDarkMode,
-            onClick = onNavigateToSmartReply
-        )
-        SettingsRowItem(
-            icon = Icons.Default.EditNote,
-            title = "AI Writing Assistant",
-            subtitle = "Grammar corrections, tones & auto-capitalization",
-            isDarkMode = isDarkMode,
-            onClick = onNavigateToAISettings
-        )
-        SettingsRowItem(
-            icon = Icons.Default.Mic,
-            title = "Voice Typing & Namaste Audio",
-            subtitle = "Speech recognition and voice output preferences",
-            isDarkMode = isDarkMode,
-            onClick = onNavigateToVoiceSettings
-        )
+                // Tactile 3D Day / Night Mode Toggle Button
+                val modeButtonBrush = if (isDarkMode) {
+                    Brush.linearGradient(listOf(Color(0xFF2E313D), Color(0xFF1E2028)))
+                } else {
+                    Brush.linearGradient(listOf(Color(0xFFFAF7F2), Color(0xFFE5E0D7)))
+                }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(modeButtonBrush)
+                        .clickable { preferences.toggleDarkMode() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        contentDescription = "Toggle Dark/Light Mode",
+                        tint = if (isDarkMode) Color(0xFFFBBF24) else Color(0xFF475569),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
 
-        // Section: Haptics & Feedback
-        SettingsSectionHeader("Haptics & Feedback")
-        SettingsToggleItem(
-            icon = Icons.Default.Vibration,
-            title = "Vibrate on Keypress",
-            subtitle = "Subtle tactile haptic feedback",
-            checked = keyVibration,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setKeyVibration(it) }
-        )
-        SettingsToggleItem(
-            icon = Icons.Default.VolumeUp,
-            title = "Sound on Keypress",
-            subtitle = "Soft clicking sound on tap",
-            checked = keySound,
-            isDarkMode = isDarkMode,
-            onCheckedChange = { preferences.setKeySound(it) }
-        )
-
-        // Section: Advanced & Privacy
-        SettingsSectionHeader("System & Privacy")
-        SettingsRowItem(
-            icon = Icons.Default.Security,
-            title = "Privacy & Security",
-            subtitle = "100% on-device processing guarantee",
-            isDarkMode = isDarkMode,
-            onClick = onNavigateToPrivacy
-        )
-        SettingsRowItem(
-            icon = Icons.Default.RestartAlt,
-            title = "Re-run Setup & Tutorial",
-            subtitle = "Open onboarding walkthrough and voice guide",
-            isDarkMode = isDarkMode,
-            onClick = onRestartOnboarding
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
+        // Section Title: Settings (Clean & Minimalist like reference image)
         Text(
-            "Global Keyboard Dynamic • Version 2.5.0\nCrafted with Material 3 & Jetpack Compose",
+            text = "Settings",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = NeumorphicColors.EmeraldAccent,
+            letterSpacing = 0.5.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+
+        // Main Unified 3D Neumorphic Settings Card (No individual border cards!)
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
+            isDarkMode = isDarkMode,
+            cornerRadius = 20.dp,
+            elevation = 8.dp
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // 1. Themes
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.Palette,
+                    title = "Themes",
+                    subtitle = "Custom backgrounds, key borders & colors",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToThemes
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 2. Keyboard height
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.SwapVert,
+                    title = "Keyboard height",
+                    subtitle = "$keyHeightDp dp",
+                    isDarkMode = isDarkMode,
+                    trailingBadge = "${keyHeightDp}dp",
+                    onClick = { showHeightDialog = true }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 3. Sound & vibration
+                NeumorphicSettingsItem(
+                    icon = Icons.AutoMirrored.Filled.VolumeUp,
+                    title = "Sound & vibration",
+                    subtitle = when {
+                        keyVibration && keySound -> "Sound & vibration enabled"
+                        keyVibration -> "Vibration enabled"
+                        keySound -> "Sound enabled"
+                        else -> "Muted"
+                    },
+                    isDarkMode = isDarkMode,
+                    onClick = { showSoundVibrationDialog = true }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 4. Emojis, numbers & symbols
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.EmojiEmotions,
+                    title = "Emojis, numbers & symbols",
+                    subtitle = if (showNumberRow) "Number row on • Emoji suggestions" else "Emoji suggestions",
+                    isDarkMode = isDarkMode,
+                    onClick = { showEmojiNumbersDialog = true }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 5. Typing & Language
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.Translate,
+                    title = "Typing",
+                    subtitle = "Language: ${activeLanguage.displayName} • Transliteration",
+                    isDarkMode = isDarkMode,
+                    onClick = { showTypingDialog = true }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 6. AI & Smart Reply
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "AI & Smart Reply",
+                    subtitle = "Contextual replies, tones & rewrite tools",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToSmartReply
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 7. Voice Typing
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.Mic,
+                    title = "Voice typing & audio",
+                    subtitle = "Real-time speech to text & Namaste audio",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToVoiceSettings
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 8. Spin & Win (Credit Wheel)
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.RotateRight,
+                    title = "Spin & Win",
+                    subtitle = "Daily lucky spin for free AI credits",
+                    isDarkMode = isDarkMode,
+                    trailingBadge = "5 Spins",
+                    badgeColor = Color(0xFFF59E0B),
+                    onClick = onNavigateToSpinAndWin
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 9. Premium
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.WorkspacePremium,
+                    title = "Premium",
+                    subtitle = if (isPremiumUser) "VIP Lifetime Active (15+ Luxury Themes)" else "Unlock VIP themes & unlimited AI",
+                    isDarkMode = isDarkMode,
+                    trailingBadge = if (isPremiumUser) "VIP Active" else "Upgrade",
+                    badgeColor = Color(0xFFF59E0B),
+                    onClick = onNavigateToPro
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 10. Re-run Setup
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.RestartAlt,
+                    title = "Re-run setup",
+                    subtitle = "Restart onboarding guide & setup steps",
+                    isDarkMode = isDarkMode,
+                    onClick = onRestartOnboarding
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 11. Privacy & Security
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.Security,
+                    title = "Privacy & security",
+                    subtitle = "100% on-device private processing",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToPrivacy
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 12. About
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.Info,
+                    title = "About",
+                    subtitle = "Global Keyboard Dynamic • v2.5.0",
+                    isDarkMode = isDarkMode,
+                    onClick = { showAboutDialog = true }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            "Global Keyboard Dynamic • Version 2.5.0\nCrafted with 3D Neumorphism UI/UX",
             fontSize = 11.sp,
             color = textMuted,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
+        Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    // --- Interactive 3D Dialogs ---
+
+    // 1. Keyboard Height Dialog with live slider and visual preview
+    if (showHeightDialog) {
+        var tempHeight by remember { mutableFloatStateOf(keyHeightDp.toFloat()) }
+        AlertDialog(
+            onDismissRequest = { showHeightDialog = false },
+            title = {
+                Text("Keyboard Height", fontWeight = FontWeight.Bold, color = textColor)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(
+                        "Adjust vertical height of letter keys. Current: ${tempHeight.toInt()} dp",
+                        fontSize = 12.5.sp,
+                        color = textMuted
+                    )
+
+                    // Live Key Height Visual Simulation
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(tempHeight.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isDarkMode) Color(0xFF262832) else Color(0xFFE2DDD4)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Preview: Key Height (${tempHeight.toInt()} dp)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor
+                        )
+                    }
+
+                    // Slider (40dp to 64dp)
+                    Slider(
+                        value = tempHeight,
+                        onValueChange = { tempHeight = it },
+                        valueRange = 40f..64f,
+                        steps = 11,
+                        colors = SliderDefaults.colors(
+                            thumbColor = NeumorphicColors.EmeraldAccent,
+                            activeTrackColor = NeumorphicColors.EmeraldAccent
+                        )
+                    )
+
+                    // Preset Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(42 to "Short", 48 to "Normal", 54 to "Tall", 60 to "Extra").forEach { (h, label) ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (tempHeight.toInt() == h) NeumorphicColors.EmeraldAccent else (if (isDarkMode) Color(0xFF262830) else Color(0xFFE5E0D6)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { tempHeight = h.toFloat() }
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (tempHeight.toInt() == h) Color.White else textColor,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        preferences.setKeyHeightDp(tempHeight.toInt())
+                        showHeightDialog = false
+                    }
+                ) {
+                    Text("Apply (${tempHeight.toInt()} dp)", color = NeumorphicColors.EmeraldAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showHeightDialog = false }) {
+                    Text("Cancel", color = textMuted)
+                }
+            },
+            containerColor = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+        )
+    }
+
+    // 2. Sound & Vibration Dialog with test haptic button
+    if (showSoundVibrationDialog) {
+        AlertDialog(
+            onDismissRequest = { showSoundVibrationDialog = false },
+            title = {
+                Text("Sound & Vibration", fontWeight = FontWeight.Bold, color = textColor)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Tactile haptic feedback and acoustic keypress audio:", fontSize = 12.sp, color = textMuted)
+
+                    // Vibrate toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Vibrate on Keypress", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Tactile haptic response on tap", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = keyVibration,
+                            onCheckedChange = { preferences.setKeyVibration(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Sound toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Sound on Keypress", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Subtle mechanical click audio", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = keySound,
+                            onCheckedChange = { preferences.setKeySound(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Test Vibration Button
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isDarkMode) Color(0xFF262832) else Color(0xFFE2DDD5),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                try {
+                                    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        vibrator?.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        vibrator?.vibrate(35)
+                                    }
+                                    Toast.makeText(context, "Haptic pulse triggered", Toast.LENGTH_SHORT).show()
+                                } catch (_: Exception) {}
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Vibration, contentDescription = null, tint = NeumorphicColors.EmeraldAccent, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Test Vibration Feedback", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = textColor)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSoundVibrationDialog = false }) {
+                    Text("Done", color = NeumorphicColors.EmeraldAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+        )
+    }
+
+    // 3. Emojis, Numbers & Symbols Dialog
+    if (showEmojiNumbersDialog) {
+        AlertDialog(
+            onDismissRequest = { showEmojiNumbersDialog = false },
+            title = {
+                Text("Emojis, Numbers & Symbols", fontWeight = FontWeight.Bold, color = textColor)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Number Row Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Dedicated Number Row", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Shows 1-0 row persistently above letter keys", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = showNumberRow,
+                            onCheckedChange = { preferences.setShowNumberRow(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Emoji Suggestions Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Contextual Emoji Suggestions", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Displays relevant emojis above suggestion strip", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = emojiSuggestionsEnabled,
+                            onCheckedChange = { preferences.setEmojiSuggestionsEnabled(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showEmojiNumbersDialog = false }) {
+                    Text("Done", color = NeumorphicColors.EmeraldAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+        )
+    }
+
+    // 4. Typing Preferences Dialog
+    if (showTypingDialog) {
+        AlertDialog(
+            onDismissRequest = { showTypingDialog = false },
+            title = {
+                Text("Typing & Language", fontWeight = FontWeight.Bold, color = textColor)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Phonetic Transliteration
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Phonetic Transliteration", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Type in English letters to get Indic script (e.g. namaste -> नमस्ते)", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = transliterationEnabled,
+                            onCheckedChange = { preferences.setTransliterationEnabled(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Auto-Correction
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-Correction", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Automatically correct typos on spacebar tap", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = autoCorrection,
+                            onCheckedChange = { preferences.setAutoCorrection(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Auto-Capitalization
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-Capitalization", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Capitalize first letter of every new sentence", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = autoCapitalization,
+                            onCheckedChange = { preferences.setAutoCapitalization(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Button to open full language picker
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isDarkMode) Color(0xFF262832) else Color(0xFFE2DDD5),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showTypingDialog = false
+                                onNavigateToLanguages()
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = NeumorphicColors.EmeraldAccent, modifier = Modifier.size(18.dp))
+                                Text("Manage Languages (${activeLanguage.displayName})", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = textColor)
+                            }
+                            Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = textMuted, modifier = Modifier.size(12.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTypingDialog = false }) {
+                    Text("Done", color = NeumorphicColors.EmeraldAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+        )
+    }
+
+    // 5. About Dialog
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = {
+                Text("About Global Keyboard", fontWeight = FontWeight.Bold, color = textColor)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Global Keyboard Dynamic • Version 2.5.0", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textColor)
+                    Text("• 100% On-Device Privacy: Your keystrokes and voice dictation never leave your phone.", fontSize = 12.sp, color = textMuted)
+                    Text("• 3D Neumorphism Design: Soft extruded surfaces, tactile lighting and dual depth.", fontSize = 12.sp, color = textMuted)
+                    Text("• Multi-Language: Phonetic transliteration for Hindi, Marathi, Gujarati, Tamil and more.", fontSize = 12.sp, color = textMuted)
+                    Text("• AI Smart Reply & Namaste TTS: Intelligent contextual suggestions with custom tones.", fontSize = 12.sp, color = textMuted)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("Close", color = NeumorphicColors.EmeraldAccent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showAboutDialog = false
+                        onNavigateToPrivacy()
+                    }
+                ) {
+                    Text("Privacy Policy", color = textMuted)
+                }
+            },
+            containerColor = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+        )
     }
 }
 
+/**
+ * 3D Neumorphic Settings Item Row.
+ * Sits cleanly within the unified Neumorphic card without ugly individual box borders,
+ * using a tactile 3D recessed icon well and subtle typography.
+ */
 @Composable
-fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color(0xFF10B981),
-        letterSpacing = 0.5.sp,
-        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
-    )
-}
-
-@Composable
-fun SettingsRowItem(
+fun NeumorphicSettingsItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
     isDarkMode: Boolean,
+    trailingBadge: String? = null,
+    badgeColor: Color = NeumorphicColors.EmeraldAccent,
     onClick: () -> Unit
 ) {
-    val cardBg = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    val borderColor = if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
-    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
 
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = cardBg),
-        border = BorderStroke(1.dp, borderColor),
+    val wellBrush = if (isDarkMode) {
+        Brush.linearGradient(listOf(NeumorphicColors.DarkWellTop, NeumorphicColors.DarkWellBottom))
+    } else {
+        Brush.linearGradient(listOf(NeumorphicColors.LightWellTop, NeumorphicColors.LightWellBottom))
+    }
+
+    val wellBorder = if (isDarkMode) {
+        BorderStroke(1.dp, Brush.linearGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.White.copy(alpha = 0.10f))))
+    } else {
+        BorderStroke(1.dp, Brush.linearGradient(listOf(Color(0x2A000000), Color.White.copy(alpha = 0.85f))))
+    }
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
+            // 3D Recessed Neumorphic Icon Well
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(wellBrush)
+                    .border(wellBorder, RoundedCornerShape(11.dp)),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
-                Column {
-                    Text(title, fontWeight = FontWeight.Bold, color = textColor, fontSize = 13.sp)
-                    Text(subtitle, fontSize = 11.sp, color = textMuted)
-                }
-            }
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = textMuted)
-        }
-    }
-}
-
-@Composable
-fun SettingsToggleItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    isDarkMode: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    val cardBg = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    val borderColor = if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
-    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = cardBg),
-        border = BorderStroke(1.dp, borderColor),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(icon, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
-                Column {
-                    Text(title, fontWeight = FontWeight.Bold, color = textColor, fontSize = 13.sp)
-                    Text(subtitle, fontSize = 11.sp, color = textMuted)
-                }
-            }
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFF059669)
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = NeumorphicColors.EmeraldAccent,
+                    modifier = Modifier.size(19.dp)
                 )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.SemiBold,
+                    color = textColor,
+                    fontSize = 13.5.sp,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(1.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = textMuted,
+                    maxLines = 1
+                )
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (trailingBadge != null) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = badgeColor.copy(alpha = 0.18f),
+                    border = BorderStroke(0.8.dp, badgeColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = trailingBadge,
+                        color = badgeColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                contentDescription = null,
+                tint = textMuted.copy(alpha = 0.55f),
+                modifier = Modifier.size(11.dp)
             )
         }
     }

@@ -150,6 +150,9 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
                     onOpenSettings = {
                         openSettingsActivity()
                     },
+                    onOpenThemesStore = {
+                        openSettingsActivity("themes")
+                    },
                     onStartSpeechRecognition = {
                         startSpeechRecognition()
                     },
@@ -318,10 +321,13 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         }
     }
 
-    private fun openSettingsActivity() {
+    private fun openSettingsActivity(destination: String? = null) {
         try {
             val intent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                if (destination != null) {
+                    putExtra("destination", destination)
+                }
             }
             startActivity(intent)
         } catch (e: Exception) {

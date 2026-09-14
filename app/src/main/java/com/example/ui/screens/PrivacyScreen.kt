@@ -52,6 +52,52 @@ fun PrivacyScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // HERO "YOUR DATA IS SAFE" CARD (Matched directly from screenshot)
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF10B981).copy(alpha = 0.08f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF10B981).copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    // Green Shield with Checkmark
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(Color(0xFF10B981).copy(alpha = 0.2f), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = "Safe Shield",
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Your data is safe",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color(0xFF10B981)
+                        )
+                        Text(
+                            text = "Global Keyboard Dynamic does not collect anything that you type. The warning you see during installation is displayed for ALL THIRD-PARTY keyboards from the Android System.",
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(12.dp),
@@ -64,7 +110,7 @@ fun PrivacyScreen(
                     }
 
                     Text(
-                        "LingoKey AI is built with privacy by design. We do not transmit or log your keystrokes. Translation and speech synthesis happen locally on device or securely when you explicitly invoke an AI transformation.",
+                        "Global Keyboard Dynamic is built with privacy by design. We do not transmit or log your keystrokes. Translation and speech synthesis happen locally on device or securely when you explicitly invoke an AI transformation.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

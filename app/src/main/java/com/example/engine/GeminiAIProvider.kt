@@ -19,13 +19,12 @@ class GeminiAIProvider(
 ) : AIProvider {
 
     private val TAG = "GeminiAIProvider"
-    private val MODEL = "gemini-2.5-flash"
-    private val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
+    private val CANDIDATE_MODELS = listOf("gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash")
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private fun getApiKey(): String? {
@@ -43,59 +42,75 @@ class GeminiAIProvider(
             return@withContext Result.failure(IllegalStateException("No Gemini API key configured"))
         }
 
-        try {
-            val rootJson = JSONObject()
+        var lastException: Exception? = null
 
-            if (!systemInstruction.isNullOrBlank()) {
-                val sysPart = JSONObject().put("text", systemInstruction)
-                val sysParts = JSONArray().put(sysPart)
-                val sysContent = JSONObject().put("parts", sysParts)
-                rootJson.put("systemInstruction", sysContent)
-            }
+        for (modelName in CANDIDATE_MODELS) {
+            try {
+                val baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+                val rootJson = JSONObject()
 
-            val contentsArray = JSONArray()
-            val contentObj = JSONObject()
-            val partsArray = JSONArray()
-            partsArray.put(JSONObject().put("text", prompt))
-            contentObj.put("parts", partsArray)
-            contentsArray.put(contentObj)
-            rootJson.put("contents", contentsArray)
-
-            val genConfig = JSONObject()
-                .put("temperature", 0.7)
-                .put("maxOutputTokens", 512)
-            rootJson.put("generationConfig", genConfig)
-
-            val requestBody = rootJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL?key=$apiKey")
-                .post(requestBody)
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                val responseString = response.body?.string() ?: ""
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Gemini API error code: ${response.code}, body: $responseString")
-                    return@withContext Result.failure(RuntimeException("Gemini API call failed with code ${response.code}"))
+                if (!systemInstruction.isNullOrBlank()) {
+                    val sysPart = JSONObject().put("text", systemInstruction)
+                    val sysParts = JSONArray().put(sysPart)
+                    val sysContent = JSONObject().put("parts", sysParts)
+                    rootJson.put("systemInstruction", sysContent)
                 }
 
-                val jsonResponse = JSONObject(responseString)
-                val candidates = jsonResponse.optJSONArray("candidates")
-                val firstCandidate = candidates?.optJSONObject(0)
-                val content = firstCandidate?.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                val text = parts?.optJSONObject(0)?.optString("text")
+                val contentsArray = JSONArray()
+                val contentObj = JSONObject()
+                val partsArray = JSONArray()
+                partsArray.put(JSONObject().put("text", prompt))
+                contentObj.put("parts", partsArray)
+                contentsArray.put(contentObj)
+                rootJson.put("contents", contentsArray)
 
-                if (!text.isNullOrBlank()) {
-                    Result.success(text.trim())
-                } else {
-                    Result.failure(RuntimeException("Empty text from Gemini response"))
+                val genConfig = JSONObject()
+                    .put("temperature", 0.7)
+                    .put("maxOutputTokens", 1024)
+                rootJson.put("generationConfig", genConfig)
+
+                val requestBody = rootJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                val request = Request.Builder()
+                    .url("$baseUrl?key=$apiKey")
+                    .post(requestBody)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val responseString = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "Gemini ($modelName) API error code: ${response.code}, body: $responseString")
+                        return@use
+                    }
+
+                    val jsonResponse = JSONObject(responseString)
+                    val candidates = jsonResponse.optJSONArray("candidates")
+                    val firstCandidate = candidates?.optJSONObject(0)
+                    val content = firstCandidate?.optJSONObject("content")
+                    val parts = content?.optJSONArray("parts")
+
+                    var text: String? = null
+                    if (parts != null) {
+                        for (p in 0 until parts.length()) {
+                            val partObj = parts.optJSONObject(p)
+                            val t = partObj?.optString("text")
+                            if (!t.isNullOrBlank()) {
+                                text = t
+                                break
+                            }
+                        }
+                    }
+
+                    if (!text.isNullOrBlank()) {
+                        return@withContext Result.success(text.trim())
+                    }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Gemini model $modelName call failed: ${e.message}")
+                lastException = e
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Gemini API execution error: ${e.message}")
-            Result.failure(e)
         }
+
+        Result.failure(lastException ?: RuntimeException("All Gemini candidate models failed"))
     }
 
     override suspend fun rewrite(text: String, tone: ToneType): Result<String> {

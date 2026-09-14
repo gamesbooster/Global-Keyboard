@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,11 +15,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.LingoKeyPreferences
+import com.example.ui.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,7 +29,8 @@ fun AISettingsScreen(
     preferences: LingoKeyPreferences,
     onBack: () -> Unit,
     onNavigateToPro: () -> Unit = {},
-    onNavigateToSmartReply: () -> Unit = {}
+    onNavigateToSmartReply: () -> Unit = {},
+    onNavigateToSpinAndWin: () -> Unit = {}
 ) {
     val autoCorrection by preferences.autoCorrection.collectAsState()
     val showSuggestions by preferences.showSuggestions.collectAsState()
@@ -42,12 +44,12 @@ fun AISettingsScreen(
     val isDarkMode by preferences.isDarkMode.collectAsState()
     val isPremiumUser by preferences.isPremiumUser.collectAsState()
     val aiUsageCount by preferences.aiUsageCount.collectAsState()
+    val aiCredits by preferences.aiCredits.collectAsState()
 
-    val bgColor = if (isDarkMode) Color(0xFF0F1016) else Color(0xFFF8FAFC)
-    val cardColor = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
-    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val textMuted = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val borderColor = if (isDarkMode) Color(0xFF26293A) else Color(0xFFE2E8F0)
+    val bgColor = if (isDarkMode) NeumorphicColors.DarkScreenBg else NeumorphicColors.LightScreenBg
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+    val dividerColor = if (isDarkMode) Color(0x18FFFFFF) else Color(0x12000000)
 
     Scaffold(
         containerColor = bgColor,
@@ -64,7 +66,7 @@ fun AISettingsScreen(
                         Icon(
                             Icons.Default.WorkspacePremium,
                             contentDescription = "VIP PRO",
-                            tint = if (isPremiumUser) Color(0xFFF59E0B) else Color(0xFF10B981)
+                            tint = if (isPremiumUser) Color(0xFFF59E0B) else NeumorphicColors.EmeraldAccent
                         )
                     }
                 },
@@ -81,22 +83,15 @@ fun AISettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // VIP AI Usage Status Card
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isPremiumUser) {
-                        if (isDarkMode) Color(0xFF14241B) else Color(0xFFF0FDF4)
-                    } else {
-                        if (isDarkMode) Color(0xFF1C2230) else Color(0xFFEFF6FF)
-                    }
-                ),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, if (isPremiumUser) Color(0xFF10B981) else Color(0xFF3B82F6).copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onNavigateToPro() }
+            // VIP AI Usage Status Card (Neumorphic)
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                isDarkMode = isDarkMode,
+                cornerRadius = 20.dp,
+                elevation = 7.dp,
+                onClick = onNavigateToPro
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -144,6 +139,38 @@ fun AISettingsScreen(
                             color = Color(0xFF3B82F6),
                             trackColor = if (isDarkMode) Color(0xFF2C2C38) else Color(0xFFE2E8F0)
                         )
+
+                        HorizontalDivider(color = dividerColor, thickness = 0.8.dp)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("AI Credits Vault:", fontSize = 12.sp, color = textMuted)
+                                Text(
+                                    "$aiCredits Credits 🪙",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF10B981)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF0F766E).copy(alpha = 0.15f),
+                                modifier = Modifier.clickable { onNavigateToSpinAndWin() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("🎰", fontSize = 12.sp)
+                                    Text("Spin & Win", fontSize = 11.5.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     } else {
                         Text(
                             "You have unlimited Gemini AI rewrite credits across all tones and languages.",
@@ -154,16 +181,13 @@ fun AISettingsScreen(
                 }
             }
 
-            // Smart Reply Feature Card
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isDarkMode) Color(0xFF1E1B4B).copy(alpha = 0.6f) else Color(0xFFEEF2FF)
-                ),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onNavigateToSmartReply() }
+            // Smart Reply Feature Card (Neumorphic)
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                isDarkMode = isDarkMode,
+                cornerRadius = 20.dp,
+                elevation = 7.dp,
+                onClick = onNavigateToSmartReply
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -202,13 +226,13 @@ fun AISettingsScreen(
 
             Text("Indian Typing & Transliteration", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = textColor)
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, borderColor),
-                modifier = Modifier.fillMaxWidth()
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                isDarkMode = isDarkMode,
+                cornerRadius = 20.dp,
+                elevation = 6.dp
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -221,14 +245,15 @@ fun AISettingsScreen(
                         Switch(
                             checked = transliterationEnabled,
                             onCheckedChange = { preferences.setTransliterationEnabled(it) },
+                            modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF059669)
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
                             )
                         )
                     }
 
-                    HorizontalDivider(color = borderColor)
+                    HorizontalDivider(color = dividerColor)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -242,9 +267,10 @@ fun AISettingsScreen(
                         Switch(
                             checked = emojiSuggestionsEnabled,
                             onCheckedChange = { preferences.setEmojiSuggestionsEnabled(it) },
+                            modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF059669)
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
                             )
                         )
                     }
@@ -253,13 +279,13 @@ fun AISettingsScreen(
 
             Text("Smart Prediction & Correction", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = textColor)
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, borderColor),
-                modifier = Modifier.fillMaxWidth()
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                isDarkMode = isDarkMode,
+                cornerRadius = 20.dp,
+                elevation = 6.dp
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -272,14 +298,15 @@ fun AISettingsScreen(
                         Switch(
                             checked = autoCorrection,
                             onCheckedChange = { preferences.setAutoCorrection(it) },
+                            modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF059669)
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
                             )
                         )
                     }
 
-                    HorizontalDivider(color = borderColor)
+                    HorizontalDivider(color = dividerColor)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -293,9 +320,10 @@ fun AISettingsScreen(
                         Switch(
                             checked = showSuggestions,
                             onCheckedChange = { preferences.setShowSuggestions(it) },
+                            modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF059669)
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
                             )
                         )
                     }
@@ -304,13 +332,13 @@ fun AISettingsScreen(
 
             Text("Hardware & Feedback", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = textColor)
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, borderColor),
-                modifier = Modifier.fillMaxWidth()
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                isDarkMode = isDarkMode,
+                cornerRadius = 20.dp,
+                elevation = 6.dp
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     // Key Height
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(
@@ -341,7 +369,7 @@ fun AISettingsScreen(
                         }
                     }
 
-                    HorizontalDivider(color = borderColor)
+                    HorizontalDivider(color = dividerColor)
 
                     // Key Haptic Vibration
                     Row(
@@ -356,14 +384,15 @@ fun AISettingsScreen(
                         Switch(
                             checked = keyVibration,
                             onCheckedChange = { preferences.setKeyVibration(it) },
+                            modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF059669)
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
                             )
                         )
                     }
 
-                    HorizontalDivider(color = borderColor)
+                    HorizontalDivider(color = dividerColor)
 
                     // Dedicated Number Row
                     Row(
@@ -378,9 +407,10 @@ fun AISettingsScreen(
                         Switch(
                             checked = showNumberRow,
                             onCheckedChange = { preferences.setShowNumberRow(it) },
+                            modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF059669)
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
                             )
                         )
                     }
@@ -399,13 +429,13 @@ fun AISettingsScreen(
                 Triple("💎 Executive VIP", "High-stakes executive negotiation & clarity", true)
             )
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, borderColor),
-                modifier = Modifier.fillMaxWidth()
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                isDarkMode = isDarkMode,
+                cornerRadius = 20.dp,
+                elevation = 6.dp
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     for ((title, desc, isPro) in personas) {
                         Row(
                             modifier = Modifier
@@ -449,6 +479,7 @@ fun AISettingsScreen(
                     }
                 }
             }
+
 
             Spacer(modifier = Modifier.height(16.dp))
         }

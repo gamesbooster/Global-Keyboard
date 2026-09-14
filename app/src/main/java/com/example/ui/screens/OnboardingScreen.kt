@@ -14,6 +14,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.VolumeMute
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,7 +26,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,7 @@ import com.example.engine.AudioGuidanceHelper
 import com.example.engine.ImeUtils
 import com.example.engine.VoiceTTSEngine
 import com.example.model.Language
+import com.example.model.LanguageCategory
 import kotlinx.coroutines.delay
 
 enum class OnboardingStep {
@@ -91,6 +94,8 @@ fun OnboardingScreen(
         }
     }
 
+    val voiceGuidanceEnabled by preferences.voiceGuidanceEnabled.collectAsState()
+
     // Function to play or stop voice guidance for the current step
     fun toggleVoiceGuidance(text: String) {
         if (isAudioPlaying) {
@@ -102,10 +107,25 @@ fun OnboardingScreen(
         }
     }
 
-    // Auto-stop speech when step changes
-    LaunchedEffect(currentStep) {
+    // Auto-play voice guidance when entering step or on first launch (default ON)
+    LaunchedEffect(currentStep, activeLanguage) {
         voiceTTSEngine.stop()
-        isAudioPlaying = false
+        if (voiceGuidanceEnabled) {
+            delay(350)
+            val guidanceText = when (currentStep) {
+                OnboardingStep.WELCOME -> AudioGuidanceHelper.getWelcomeAudioText(activeLanguage)
+                OnboardingStep.PERMISSIONS_PRIVACY -> AudioGuidanceHelper.getPermissionsAudioText(activeLanguage)
+                OnboardingStep.LANGUAGE_SETUP -> AudioGuidanceHelper.getLanguageStepAudioText(activeLanguage)
+                OnboardingStep.ENABLE_KEYBOARD -> AudioGuidanceHelper.getEnableStepAudioText(activeLanguage)
+                OnboardingStep.SELECT_KEYBOARD -> AudioGuidanceHelper.getSelectStepAudioText(activeLanguage)
+                OnboardingStep.KEYBOARD_READY -> AudioGuidanceHelper.getReadyAudioText(activeLanguage)
+                OnboardingStep.TUTORIAL -> AudioGuidanceHelper.getTutorialAudioText(activeLanguage)
+            }
+            voiceTTSEngine.speak(guidanceText, activeLanguage.ttsLocaleTag)
+            isAudioPlaying = true
+        } else {
+            isAudioPlaying = false
+        }
     }
 
     Scaffold(
@@ -307,7 +327,7 @@ fun AudioVoiceButton(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
-                imageVector = if (isPlaying) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
+                imageVector = if (isPlaying) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeMute,
                 contentDescription = label,
                 tint = if (isPlaying) Color.White else Color(0xFF94A3B8),
                 modifier = Modifier.size(18.dp)
@@ -440,19 +460,19 @@ fun PermissionsStep(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Box(
                 modifier = Modifier
-                    .size(68.dp)
+                    .size(54.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF059669).copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(36.dp))
+                Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(30.dp))
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 "Privacy & System Alert",
@@ -468,7 +488,7 @@ fun PermissionsStep(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             AudioVoiceButton(
                 isPlaying = isAudioPlaying,
@@ -476,36 +496,74 @@ fun PermissionsStep(
                 label = "Listen Explanation"
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
+            // HERO CARD MATCHING USER SCREENSHOT: "Your data is safe"
             Card(
                 shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B).copy(alpha = 0.35f)),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF10B981)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF10B981).copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Security,
+                            contentDescription = "Safe Shield",
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Your data is safe",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF10B981)
+                        )
+                        Text(
+                            "Global Keyboard Dynamic does not collect anything that you type. The warning you see during installation is displayed for ALL THIRD-PARTY keyboards from the Android System.",
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = Color(0xFFE2E8F0)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Card(
+                shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F2A)),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3346)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
                         Column {
-                            Text("Standard Android Security Alert", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                            Text("When enabling any custom keyboard, Android OS displays a default warning dialog. This is completely standard across all Android devices.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Text("100% On-Device & Private", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.5.sp)
+                            Text("Your personal keystrokes, passwords, and private messages are processed entirely locally and never logged or sent to any remote server.", fontSize = 11.sp, color = Color(0xFF94A3B8))
                         }
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Mic, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
                         Column {
-                            Text("100% On-Device & Private", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                            Text("Global Keyboard Dynamic processes your typing locally. Your personal keystrokes, passwords, and private data are never logged or sold.", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Default.Mic, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
-                        Column {
-                            Text("Audio Recording Permission", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                            Text("Microphone access is used strictly when you tap the mic key to speak and convert voice into text in real-time.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Text("Microphone for Real-time Voice Typing", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.5.sp)
+                            Text("Microphone access is strictly user-initiated when you tap the mic button to speak, converting voice to text instantly.", fontSize = 11.sp, color = Color(0xFF94A3B8))
                         }
                     }
                 }
@@ -548,13 +606,34 @@ fun LanguageSetupStep(
     onNext: () -> Unit,
     onBack: () -> Unit
 ) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf(LanguageCategory.ALL) }
+
+    val filteredLanguages = remember(searchQuery, selectedCategory) {
+        Language.ALL_LANGUAGES.filter { lang ->
+            val matchesCategory = when (selectedCategory) {
+                LanguageCategory.ALL -> true
+                LanguageCategory.INDIAN -> !lang.isGlobal
+                LanguageCategory.GLOBAL -> lang.isGlobal
+            }
+            val matchesSearch = if (searchQuery.isBlank()) true else {
+                lang.displayName.contains(searchQuery, ignoreCase = true) ||
+                lang.nativeName.contains(searchQuery, ignoreCase = true) ||
+                lang.code.contains(searchQuery, ignoreCase = true)
+            }
+            matchesCategory && matchesSearch
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Spacer(modifier = Modifier.height(6.dp))
-
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
             Text(
                 "Choose Your Language",
                 fontSize = 20.sp,
@@ -563,51 +642,131 @@ fun LanguageSetupStep(
             )
 
             Text(
-                "Select your primary typing and transliteration language:",
+                "Select your primary typing & transliteration language (${Language.ALL_LANGUAGES.size} available):",
                 fontSize = 12.sp,
                 color = Color(0xFF94A3B8)
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search 30+ languages...", fontSize = 12.5.sp, color = Color(0xFF64748B)) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF1A1C28),
+                    unfocusedContainerColor = Color(0xFF141620),
+                    focusedBorderColor = Color(0xFF10B981),
+                    unfocusedBorderColor = Color(0xFF2E3346),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Category Filter Chips
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                LanguageCategory.entries.forEach { category ->
+                    val isCatSelected = selectedCategory == category
+                    Surface(
+                        onClick = { selectedCategory = category },
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isCatSelected) Color(0xFF059669) else Color(0xFF1E202E),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isCatSelected) Color(0xFF34D399) else Color(0xFF2E3346)
+                        )
+                    ) {
+                        Text(
+                            text = category.displayName,
+                            fontSize = 11.sp,
+                            fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isCatSelected) Color.White else Color(0xFF94A3B8),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // FULL-SCREEN LazyColumn with 20% reduced vertical height per card
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(340.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(Language.ALL_LANGUAGES) { lang ->
+                items(filteredLanguages) { lang ->
                     val isSelected = lang.id == activeLanguage.id
                     Surface(
                         onClick = { onSelectPrimary(lang) },
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (isSelected) Color(0xFF064E3B) else Color(0xFF1E1F2A),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) Color(0xFF064E3B) else Color(0xFF1A1C28),
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
-                            if (isSelected) Color(0xFF10B981) else Color(0xFF2E3346)
+                            if (isSelected) Color(0xFF10B981) else Color(0xFF2B2F42)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(14.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text(lang.flagEmoji, fontSize = 24.sp)
+                                Text(lang.flagEmoji, fontSize = 20.sp)
                                 Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            lang.displayName,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color.White,
+                                            fontSize = 13.5.sp
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (lang.isGlobal) Color(0xFF3B82F6).copy(alpha = 0.2f) else Color(0xFFF59E0B).copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                text = if (lang.isGlobal) "Global" else "Indian",
+                                                color = if (lang.isGlobal) Color(0xFF60A5FA) else Color(0xFFFBBF24),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
                                     Text(
-                                        lang.displayName,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        lang.nativeName,
-                                        fontSize = 12.sp,
+                                        "${lang.nativeName} • ${lang.layoutType.name}",
+                                        fontSize = 11.sp,
                                         color = if (isSelected) Color(0xFF34D399) else Color(0xFF94A3B8)
                                     )
                                 }
@@ -618,7 +777,7 @@ fun LanguageSetupStep(
                                     Icons.Default.CheckCircle,
                                     contentDescription = "Selected",
                                     tint = Color(0xFF10B981),
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -626,6 +785,8 @@ fun LanguageSetupStep(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -650,6 +811,8 @@ fun LanguageSetupStep(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
             ) {
                 Text("Continue to Setup", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
             }
         }
     }

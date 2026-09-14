@@ -11,7 +11,8 @@ enum class KeyboardMode {
     VOICE_PANEL,
     LANGUAGE_PANEL,
     TOOLS_PANEL,
-    SMART_REPLY_PANEL
+    SMART_REPLY_PANEL,
+    THEMES_PANEL
 }
 
 sealed class AIState {

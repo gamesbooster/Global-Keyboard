@@ -239,7 +239,7 @@ class OfflineSmartReplyProvider : SmartReplyProvider {
         val filtered = SmartReplyQualityFilter.filterAndValidate(replies, request.maxReplies)
         return Result.success(
             SmartReplyResponse(
-                detectedLanguage = detection.displayName,
+                detectedLanguage = detection.detectedLanguageName,
                 dominantLanguage = langCode,
                 isCodeMixed = isCodeMixed,
                 replies = filtered,

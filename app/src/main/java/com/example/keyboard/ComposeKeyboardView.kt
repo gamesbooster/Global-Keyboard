@@ -4,6 +4,9 @@ import android.view.HapticFeedbackConstants
 import android.view.inputmethod.EditorInfo
 import com.example.engine.smartreply.*
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,6 +68,7 @@ fun ComposeKeyboardView(
     onGetContextText: () -> String,
     onReplaceAllText: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenThemesStore: () -> Unit = onOpenSettings,
     onMoveCursor: (Int) -> Unit = {},
     onStartSpeechRecognition: (() -> Unit)? = null,
     onStopSpeechRecognition: (() -> Unit)? = null,
@@ -360,7 +364,8 @@ fun ComposeKeyboardView(
         modifier = Modifier
             .fillMaxWidth()
             .then(backgroundModifier)
-            .padding(bottom = 2.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 6.dp)
     ) {
         // TOP SMART TOOLBAR
         SmartToolbar(
@@ -444,6 +449,14 @@ fun ComposeKeyboardView(
             onOpenSmartReply = { keyboardMode = KeyboardMode.SMART_REPLY_PANEL }
         )
 
+        // DYNAMIC KEYBOARD PANEL HEIGHT (Strictly synchronized with keyHeightDp to prevent panel reduction)
+        val standardPanelHeight = remember(keyHeightDp, showNumberRow, showSuggestions) {
+            var h = (keyHeightDp * 4).dp + 16.dp
+            if (showSuggestions) h += 40.dp
+            if (showNumberRow) h += ((keyHeightDp * 0.78f).coerceAtLeast(36f)).dp + 4.dp
+            h.coerceAtLeast(265.dp)
+        }
+
         // CONTENT AREA (Panels OR Main Keyboard)
         AnimatedContent(
             targetState = keyboardMode,
@@ -466,10 +479,13 @@ fun ComposeKeyboardView(
                         },
                         onOpenClipboard = { keyboardMode = KeyboardMode.CLIPBOARD },
                         onOpenAI = { keyboardMode = KeyboardMode.AI_PANEL; aiActionState = AIState.Idle },
-                        onOpenThemes = onOpenSettings,
+                        onOpenThemes = {
+                            onOpenThemesStore()
+                        },
                         onOpenLanguages = { keyboardMode = KeyboardMode.LANGUAGE_PANEL },
                         onOpenSettings = onOpenSettings,
-                        onClose = { keyboardMode = KeyboardMode.ALPHABET }
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -485,7 +501,20 @@ fun ComposeKeyboardView(
                         },
                         onBack = { keyboardMode = KeyboardMode.TOOLS_PANEL },
                         onClose = { keyboardMode = KeyboardMode.ALPHABET },
-                        onOpenSettings = onOpenSettings
+                        onOpenSettings = onOpenSettings,
+                        panelHeight = standardPanelHeight
+                    )
+                }
+
+                KeyboardMode.THEMES_PANEL -> {
+                    ThemesPanel(
+                        theme = currentTheme,
+                        onSelectTheme = { selectedTheme ->
+                            preferences.setTheme(selectedTheme)
+                        },
+                        onOpenFullSettings = onOpenSettings,
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -556,7 +585,8 @@ fun ComposeKeyboardView(
                         onSpeakResult = { text ->
                             voiceTTSEngine.speak(text, activeLanguage.ttsLocaleTag)
                         },
-                        onClose = { keyboardMode = KeyboardMode.ALPHABET }
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -631,7 +661,8 @@ fun ComposeKeyboardView(
                         onSpeak = { text, lang ->
                             voiceTTSEngine.speak(text, lang.ttsLocaleTag)
                         },
-                        onClose = { keyboardMode = KeyboardMode.ALPHABET }
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -680,7 +711,8 @@ fun ComposeKeyboardView(
                         onClose = {
                             onStopSpeechRecognition?.invoke()
                             keyboardMode = KeyboardMode.ALPHABET
-                        }
+                        },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -692,7 +724,8 @@ fun ComposeKeyboardView(
                             onCommitText(emoji)
                         },
                         onClose = { keyboardMode = KeyboardMode.ALPHABET },
-                        onDelete = { handleBackspace() }
+                        onDelete = { handleBackspace() },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -705,7 +738,8 @@ fun ComposeKeyboardView(
                             onCommitText(text)
                             keyboardMode = KeyboardMode.ALPHABET
                         },
-                        onClose = { keyboardMode = KeyboardMode.ALPHABET }
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -723,7 +757,8 @@ fun ComposeKeyboardView(
                             preferences.setTargetTranslationLanguage(lang)
                             voiceTTSEngine.speak("Translating to ${lang.displayName}", lang.ttsLocaleTag)
                         },
-                        onClose = { keyboardMode = KeyboardMode.ALPHABET }
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
                     )
                 }
 
@@ -966,6 +1001,7 @@ fun ComposeKeyboardView(
                             enabledLanguages = enabledLanguages,
                             height = currentKeyHeight,
                             isTransliterationActive = transliterationEnabled,
+                            editorInfo = currentEditorInfo,
                             onMoveCursor = onMoveCursor,
                             onSwitchMode = { newMode ->
                                 vibrate()
@@ -1059,76 +1095,6 @@ fun SmartToolbar(
                     contentDescription = "Select Language",
                     tint = theme.accentColor,
                     modifier = Modifier.size(14.dp)
-                )
-            }
-        }
-
-        // TRANSLITERATION HINGLISH TOGGLE PILL: [A → अ ON/OFF]
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = if (transliterationEnabled) theme.primaryColor else theme.keyColor,
-            border = BorderStroke(1.dp, if (transliterationEnabled) theme.primaryColor else theme.keyBorderColor),
-            modifier = Modifier.clickable { onToggleTransliteration() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "A → अ",
-                    color = if (transliterationEnabled) Color.White else theme.textColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = if (transliterationEnabled) "ON" else "OFF",
-                    color = if (transliterationEnabled) Color.White.copy(alpha = 0.85f) else theme.textSecondaryColor,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
-        // NUMBER ROW TOGGLE PILL: [123 Row]
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = if (showNumberRow) theme.primaryColor.copy(alpha = 0.22f) else theme.keyColor,
-            border = BorderStroke(1.dp, if (showNumberRow) theme.primaryColor else theme.keyBorderColor),
-            modifier = Modifier.clickable { onToggleNumberRow() }
-        ) {
-            Text(
-                text = "123 Row",
-                color = if (showNumberRow) theme.accentColor else theme.textColor,
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp)
-            )
-        }
-
-        // KEYBOARD HEIGHT CUSTOMIZATION PILL: [↕ 48dp]
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = theme.keyColor,
-            border = BorderStroke(1.dp, theme.keyBorderColor),
-            modifier = Modifier.clickable { onCycleHeight() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Icon(
-                    Icons.Default.Height,
-                    contentDescription = "Keyboard Height",
-                    tint = theme.accentColor,
-                    modifier = Modifier.size(13.dp)
-                )
-                Text(
-                    text = "${keyHeightDp}dp",
-                    color = theme.textColor,
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -1409,157 +1375,321 @@ fun ThemedKeyBox(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val cornerRadius = theme.keyCornerRadius.dp
-    val shape = RoundedCornerShape(cornerRadius)
+    val cornerRadius = when (theme.themeStyle) {
+        ThemeStyle.CLAYMORPHISM -> 11f
+        ThemeStyle.NEOBRUTALISM -> 5f
+        ThemeStyle.FLAT_DESIGN -> 4f
+        else -> theme.keyCornerRadius
+    }.dp
+
+    val shape = if (isSelected && isSpecial) RoundedCornerShape(16.dp) else RoundedCornerShape(cornerRadius)
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
-    val baseModifier = modifier.height(height).then(clickModifier)
 
-    when (theme.themeStyle) {
-        ThemeStyle.GLASSMORPHISM -> {
-            val glassBg = if (isSelected) theme.primaryColor.copy(alpha = 0.70f)
-            else if (isPressed) theme.primaryColor.copy(alpha = 0.45f)
-            else if (isSpecial) theme.keySpecialColor.copy(alpha = 0.32f)
-            else theme.keyColor.copy(alpha = 0.24f)
+    val isTactile3D = theme.themeStyle == ThemeStyle.TACTILE_3D ||
+            theme.themeStyle == ThemeStyle.SKEUOMORPHISM ||
+            theme.themeStyle == ThemeStyle.NEUMORPHISM_LIGHT ||
+            theme.themeStyle == ThemeStyle.NEUMORPHISM_DARK
 
-            val sheenGradient = Brush.verticalGradient(
-                listOf(
-                    Color.White.copy(alpha = if (isPressed) 0.35f else 0.22f),
-                    Color.White.copy(alpha = 0.04f)
-                )
-            )
+    // Authentic mechanical spring depression: smoothly depresses to scale(0.96f) on touch
+    val animatedScale by animateFloatAsState(
+        targetValue = if (isPressed) {
+            if (isTactile3D) 0.95f else 0.97f
+        } else 1.0f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "mechanicalScale"
+    )
 
-            Box(
-                modifier = baseModifier
-                    .clip(shape)
-                    .background(glassBg)
-                    .background(sheenGradient)
-                    .border(if (isPressed) 1.2.dp else 0.85.dp, Color.White.copy(alpha = if (isPressed) 0.7f else 0.42f), shape),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
+    val baseModifier = modifier
+        .height(height)
+        .then(clickModifier)
+        .graphicsLayer {
+            scaleX = animatedScale
+            scaleY = animatedScale
         }
 
-        ThemeStyle.NEUMORPHISM_LIGHT -> {
-            val keyBg = if (isSelected) theme.primaryColor
-            else if (isPressed) Color(0xFFD3DAE2)
-            else if (isSpecial) theme.keySpecialColor
-            else theme.keyColor
+    // Outer elevation shadow when resting
+    val elevationDp = if (isPressed) 0.dp else when (theme.themeStyle) {
+        ThemeStyle.TACTILE_3D -> 3.5.dp
+        ThemeStyle.SKEUOMORPHISM -> 3.5.dp
+        ThemeStyle.NEUMORPHISM_LIGHT, ThemeStyle.NEUMORPHISM_DARK -> 2.5.dp
+        ThemeStyle.CLAYMORPHISM -> 4.dp
+        ThemeStyle.FLAT_2_0 -> 1.dp
+        ThemeStyle.SEMI_TRANSPARENT, ThemeStyle.GLASSMORPHISM -> 0.dp
+        ThemeStyle.MINIMALISM, ThemeStyle.FLAT_DESIGN, ThemeStyle.NEOBRUTALISM -> 0.dp
+        else -> 1.5.dp
+    }
 
-            Box(
-                modifier = baseModifier
-                    .clip(shape)
-                    .background(keyBg)
-                    .border(
-                        if (isPressed) 0.8.dp else 1.dp,
-                        if (isPressed) Color(0xFFB8C2CC) else Color.White.copy(alpha = 0.85f),
-                        shape
-                    ),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
-        }
+    Box(
+        modifier = baseModifier
+            .shadow(elevation = elevationDp, shape = shape, clip = false)
+            .clip(shape),
+        contentAlignment = Alignment.Center
+    ) {
+        when (theme.themeStyle) {
+            ThemeStyle.SEMI_TRANSPARENT -> {
+                // THE USER'S BELOVED SEMI-TRANSPARENT STYLE: Translucent keys letting background gradients shine through
+                val transBg = if (isSelected) theme.primaryColor.copy(alpha = 0.65f)
+                else if (isPressed) theme.primaryColor.copy(alpha = 0.45f)
+                else if (isSpecial) theme.keySpecialColor.copy(alpha = 0.45f)
+                else theme.keyColor.copy(alpha = 0.32f)
 
-        ThemeStyle.NEUMORPHISM_DARK -> {
-            val keyBg = if (isSelected) theme.primaryColor
-            else if (isPressed) Color(0xFF14171A)
-            else if (isSpecial) theme.keySpecialColor
-            else theme.keyColor
-
-            Box(
-                modifier = baseModifier
-                    .clip(shape)
-                    .background(keyBg)
-                    .border(
-                        0.75.dp,
-                        if (isPressed) theme.primaryColor.copy(alpha = 0.6f) else Color(0xFF333B44),
-                        shape
-                    ),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
-        }
-
-        ThemeStyle.FLAT_DESIGN -> {
-            val keyBg = if (isSelected) theme.accentColor
-            else if (isPressed) theme.keyPressedColor
-            else if (isSpecial) theme.keySpecialColor
-            else theme.keyColor
-
-            Box(
-                modifier = baseModifier
-                    .clip(shape)
-                    .background(keyBg),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
-        }
-
-        ThemeStyle.MINIMALISM -> {
-            val keyBg = if (isSelected) theme.accentColor.copy(alpha = 0.40f)
-            else if (isPressed) theme.accentColor.copy(alpha = 0.28f)
-            else if (isSpecial) theme.keySpecialColor.copy(alpha = theme.keyAlpha)
-            else theme.keyColor.copy(alpha = theme.keyAlpha)
-
-            Box(
-                modifier = baseModifier
-                    .clip(shape)
-                    .background(keyBg)
-                    .border(0.5.dp, theme.keyBorderColor, shape),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
-        }
-
-        ThemeStyle.SKEUOMORPHISM -> {
-            val keyBg = if (isSelected) theme.primaryColor
-            else if (isPressed) Color(0xFF1A1C20)
-            else if (isSpecial) theme.keySpecialColor
-            else theme.keyColor
-
-            val glossGradient = if (isPressed) {
-                Brush.verticalGradient(
-                    listOf(
-                        Color.Transparent,
-                        Color.Black.copy(alpha = 0.35f)
-                    )
-                )
-            } else {
-                Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.22f),
-                        Color.Transparent
-                    )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(transBg)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = if (isPressed) 0.22f else 0.15f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                        .border(
+                            if (isPressed) 1.2.dp else 0.85.dp,
+                            if (isPressed) theme.accentColor.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.35f),
+                            shape
+                        )
                 )
             }
 
-            Box(
-                modifier = baseModifier
-                    .clip(shape)
-                    .background(keyBg)
-                    .background(glossGradient)
-                    .border(1.dp, Color(0xFF101215), shape),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
+            ThemeStyle.TACTILE_3D -> {
+                // 3D MECHANICAL BUTTONS: Sculpted tactile keycaps with deep physical switch bevel
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) theme.keyPressedColor
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(
+                            if (isPressed) 1.2.dp else 0.8.dp,
+                            if (isPressed) theme.primaryColor.copy(alpha = 0.8f) else theme.keyBorderColor,
+                            shape
+                        )
+                )
+            }
+
+            ThemeStyle.GLASSMORPHISM -> {
+                val glassBg = if (isSelected) theme.primaryColor.copy(alpha = 0.70f)
+                else if (isPressed) theme.primaryColor.copy(alpha = 0.45f)
+                else if (isSpecial) theme.keySpecialColor.copy(alpha = 0.35f)
+                else theme.keyColor.copy(alpha = 0.26f)
+
+                val sheenGradient = Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (isPressed) 0.35f else 0.22f),
+                        Color.White.copy(alpha = 0.04f)
+                    )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(glassBg)
+                        .background(sheenGradient)
+                        .border(
+                            if (isPressed) 1.2.dp else 0.85.dp,
+                            Color.White.copy(alpha = if (isPressed) 0.7f else 0.45f),
+                            shape
+                        )
+                )
+            }
+
+            ThemeStyle.NEUMORPHISM_LIGHT -> {
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) Color(0xFFD1D8E0)
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(
+                            if (isPressed) 1.2.dp else 1.dp,
+                            if (isPressed) Color(0xFF94A3B8) else Color.White.copy(alpha = 0.90f),
+                            shape
+                        )
+                )
+            }
+
+            ThemeStyle.NEUMORPHISM_DARK -> {
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) Color(0xFF131518)
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(
+                            if (isPressed) 1.dp else 0.75.dp,
+                            if (isPressed) theme.primaryColor.copy(alpha = 0.7f) else Color(0xFF38404A),
+                            shape
+                        )
+                )
+            }
+
+            ThemeStyle.CLAYMORPHISM -> {
+                // PUFFY 3D CLAYMORPHISM: Marshmallow soft rounded volume with inner highlight
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) theme.keyPressedColor
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = if (theme.isDark) 0.20f else 0.45f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = if (theme.isDark) 0.25f else 0.08f)
+                                )
+                            )
+                        )
+                        .border(
+                            1.dp,
+                            if (isPressed) theme.primaryColor.copy(alpha = 0.7f) else Color.White.copy(alpha = if (theme.isDark) 0.18f else 0.65f),
+                            shape
+                        )
+                )
+            }
+
+            ThemeStyle.SKEUOMORPHISM -> {
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) Color(0xFF16181B)
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(
+                            if (isPressed) 1.2.dp else 1.dp,
+                            if (isPressed) Color(0xFF0A0C0E) else Color(0xFF2C323A),
+                            shape
+                        )
+                )
+            }
+
+            ThemeStyle.FLAT_DESIGN -> {
+                val keyBg = if (isSelected) theme.accentColor
+                else if (isPressed) theme.keyPressedColor
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                )
+            }
+
+            ThemeStyle.FLAT_2_0 -> {
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) theme.keyPressedColor
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(0.6.dp, theme.keyBorderColor.copy(alpha = 0.5f), shape)
+                )
+            }
+
+            ThemeStyle.NEOBRUTALISM -> {
+                // NEOBRUTALISM: Stark high-contrast pop art with thick 2dp black border
+                val keyBg = if (isSelected) theme.accentColor
+                else if (isPressed) theme.keyPressedColor
+                else if (isSpecial) theme.keySpecialColor
+                else theme.keyColor
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(1.8.dp, Color(0xFF111111), shape)
+                )
+            }
+
+            ThemeStyle.MINIMALISM -> {
+                val keyBg = if (isSelected) theme.accentColor.copy(alpha = 0.40f)
+                else if (isPressed) theme.accentColor.copy(alpha = 0.28f)
+                else if (isSpecial) theme.keySpecialColor.copy(alpha = theme.keyAlpha)
+                else theme.keyColor.copy(alpha = theme.keyAlpha)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(0.5.dp, theme.keyBorderColor, shape)
+                )
+            }
+
+            ThemeStyle.MATERIAL_YOU, ThemeStyle.STANDARD -> {
+                val keyBg = if (isSelected) theme.primaryColor
+                else if (isPressed) theme.keyPressedColor
+                else if (isSpecial) theme.keySpecialColor.copy(alpha = theme.keyAlpha)
+                else theme.keyColor.copy(alpha = theme.keyAlpha)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(keyBg)
+                        .border(
+                            0.6.dp,
+                            if (isPressed) theme.primaryColor.copy(alpha = 0.4f) else theme.keyBorderColor,
+                            shape
+                        )
+                )
+            }
         }
 
-        ThemeStyle.MATERIAL_YOU, ThemeStyle.STANDARD -> {
-            val keyBg = if (isSelected) theme.primaryColor
-            else if (isPressed) theme.keyPressedColor
-            else if (isSpecial) theme.keySpecialColor.copy(alpha = theme.keyAlpha)
-            else theme.keyColor.copy(alpha = theme.keyAlpha)
-
-            val finalShape = if (isSelected && isSpecial) RoundedCornerShape(16.dp) else shape
-
-            Box(
-                modifier = baseModifier
-                    .clip(finalShape)
-                    .background(keyBg)
-                    .border(0.5.dp, theme.keyBorderColor, finalShape),
-                contentAlignment = Alignment.Center,
-                content = content
-            )
+        // Tactile 3D Inset Shadow and Top Sheen ONLY applied to 3D/tactile styles
+        if (isTactile3D) {
+            if (isPressed) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = if (theme.isDark) 0.42f else 0.26f),
+                                    Color.Black.copy(alpha = 0.08f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    if (theme.isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.40f),
+                                    Color.Transparent,
+                                    if (theme.isDark) Color.Black.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.06f)
+                                )
+                            )
+                        )
+                )
+            }
         }
+
+        // Key inner content
+        content()
     }
 }
 
@@ -1575,18 +1705,26 @@ fun KeyButton(
 ) {
     var isPressed by remember { mutableStateOf(false) }
 
+    // Auto-dismiss safety timer ensures key pop preview never freezes or stays stuck on screen!
+    LaunchedEffect(isPressed) {
+        if (isPressed) {
+            delay(120)
+            isPressed = false
+        }
+    }
+
     Box(
         modifier = modifier
             .height(height)
             .pointerInput(text) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    isPressed = true
-                    onClick()
-                    down.consume()
-                    waitForUpOrCancellation()
-                    isPressed = false
-                }
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        onClick()
+                        tryAwaitRelease()
+                        isPressed = false
+                    }
+                )
             },
         contentAlignment = Alignment.Center
     ) {
@@ -1624,7 +1762,7 @@ fun KeyButton(
             }
         }
 
-        // Gboard-Style Floating Key Preview Popup (Character Magnifier)
+        // Gboard-Style Floating 3D Key Preview Popup (Character Magnifier)
         if (isPressed && showPreview && text.length == 1) {
             Box(
                 modifier = Modifier
@@ -1633,7 +1771,7 @@ fun KeyButton(
                     .width(52.dp)
                     .height(48.dp)
                     .zIndex(100f)
-                    .shadow(8.dp, shape = RoundedCornerShape(12.dp))
+                    .shadow(10.dp, shape = RoundedCornerShape(12.dp))
                     .background(
                         if (theme.isDark) Color(0xFF282C37) else Color(0xFFF1F3F4),
                         shape = RoundedCornerShape(12.dp)
@@ -1668,18 +1806,25 @@ fun KeySpecialButton(
 ) {
     var isPressed by remember { mutableStateOf(false) }
 
+    LaunchedEffect(isPressed) {
+        if (isPressed) {
+            delay(120)
+            isPressed = false
+        }
+    }
+
     Box(
         modifier = modifier
             .height(height)
             .pointerInput(text ?: icon.toString()) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    isPressed = true
-                    onClick()
-                    down.consume()
-                    waitForUpOrCancellation()
-                    isPressed = false
-                }
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        onClick()
+                        tryAwaitRelease()
+                        isPressed = false
+                    }
+                )
             },
         contentAlignment = Alignment.Center
     ) {
@@ -1796,6 +1941,7 @@ fun BottomActionRow(
     enabledLanguages: List<Language>,
     height: Dp = 48.dp,
     isTransliterationActive: Boolean = false,
+    editorInfo: EditorInfo? = null,
     onMoveCursor: (Int) -> Unit = {},
     onSwitchMode: (KeyboardMode) -> Unit,
     onSwitchLanguage: () -> Unit,
@@ -1809,14 +1955,14 @@ fun BottomActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp, vertical = 1.dp),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(1.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Mode Switcher (?123 or ABC)
         KeySpecialButton(
             text = if (keyboardMode == KeyboardMode.ALPHABET) "?123" else "ABC",
-            modifier = Modifier.weight(1.35f),
+            modifier = Modifier.weight(1.3f),
             theme = theme,
             height = height,
             onClick = {
@@ -1836,7 +1982,7 @@ fun BottomActionRow(
         // Space Bar with Cursor Scrubbing & Indic / Hinglish Label
         Box(
             modifier = Modifier
-                .weight(5f)
+                .weight(4.7f)
                 .height(height)
                 .pointerInput(Unit) {
                     awaitEachGesture {
@@ -1928,10 +2074,26 @@ fun BottomActionRow(
             onClick = onOpenEmoji
         )
 
-        // Enter / Action Key (Dynamic Pill / Primary Action)
+        // Enter / Action Key (Dynamic Pill / Primary Action based on field action)
+        val imeAction = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+        val isMultiline = editorInfo?.inputType?.let { inputType ->
+            (inputType and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT) &&
+                    (inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
+        } ?: false
+
+        val actionIcon = when {
+            isMultiline -> Icons.AutoMirrored.Filled.KeyboardReturn
+            imeAction == EditorInfo.IME_ACTION_SEARCH -> Icons.Default.Search
+            imeAction == EditorInfo.IME_ACTION_GO -> Icons.AutoMirrored.Filled.ArrowForward
+            imeAction == EditorInfo.IME_ACTION_SEND -> Icons.AutoMirrored.Filled.Send
+            imeAction == EditorInfo.IME_ACTION_NEXT -> Icons.AutoMirrored.Filled.ArrowForward
+            imeAction == EditorInfo.IME_ACTION_DONE -> Icons.Default.Done
+            else -> Icons.AutoMirrored.Filled.KeyboardReturn
+        }
+
         KeySpecialButton(
-            icon = Icons.AutoMirrored.Filled.Send,
-            modifier = Modifier.weight(1.5f),
+            icon = actionIcon,
+            modifier = Modifier.weight(1.4f),
             theme = theme,
             isSelected = true,
             height = height,
@@ -1947,12 +2109,13 @@ fun LanguagePanel(
     targetLanguage: Language,
     onSelectSourceLanguage: (Language) -> Unit,
     onSelectTargetLanguage: (Language) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    panelHeight: Dp = 265.dp
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.SpaceBetween
@@ -2168,14 +2331,15 @@ fun AIPanel(
     onCustomPrompt: (String) -> Unit,
     onInsertResult: (String) -> Unit,
     onSpeakResult: (String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    panelHeight: Dp = 265.dp
 ) {
     var promptInput by remember(currentContextText) { mutableStateOf(currentContextText) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(horizontal = 10.dp, vertical = 6.dp)
             .verticalScroll(rememberScrollState())
@@ -2513,14 +2677,15 @@ fun TranslatePanel(
     onReverseLanguages: () -> Unit,
     onInsert: () -> Unit,
     onSpeak: (String, Language) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    panelHeight: Dp = 265.dp
 ) {
     var expandedDropdown by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(230.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(8.dp)
             .verticalScroll(rememberScrollState())
@@ -2679,7 +2844,8 @@ fun VoicePanel(
     onStopListening: () -> Unit,
     onInsert: () -> Unit,
     onTranslateAndInsert: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    panelHeight: Dp = 265.dp
 ) {
     val isListening = voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING
 
@@ -2696,7 +2862,7 @@ fun VoicePanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(250.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -2937,7 +3103,8 @@ fun EmojiPanel(
     theme: KeyboardTheme,
     onEmojiClick: (String) -> Unit,
     onClose: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    panelHeight: Dp = 265.dp
 ) {
     var mediaMode by remember { mutableStateOf("EMOJI") } // EMOJI, STICKERS, KAOMOJI
     var selectedCategory by remember { mutableStateOf("Smileys") }
@@ -2947,7 +3114,7 @@ fun EmojiPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(245.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(horizontal = 6.dp, vertical = 4.dp)
     ) {
@@ -3202,14 +3369,15 @@ fun ClipboardPanel(
     theme: KeyboardTheme,
     clipboardRepository: ClipboardRepository,
     onPaste: (String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    panelHeight: Dp = 265.dp
 ) {
     val items by clipboardRepository.items.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(230.dp)
+            .height(panelHeight)
             .background(theme.backgroundColor)
             .padding(8.dp)
     ) {

@@ -15,7 +15,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -212,7 +214,7 @@ fun ThemesScreen(
                                     },
                                     modifier = Modifier.size(32.dp)
                                 ) {
-                                    Icon(Icons.Default.VolumeUp, contentDescription = "Play Voice", tint = Color(0xFF6366F1))
+                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Play Voice", tint = Color(0xFF6366F1))
                                 }
                             }
                         }
@@ -304,7 +306,7 @@ fun ThemesScreen(
 
                                 PreviewKey(
                                     theme = currentTheme,
-                                    icon = Icons.Default.Backspace,
+                                    icon = Icons.AutoMirrored.Filled.Backspace,
                                     modifier = Modifier.weight(1.5f),
                                     isSpecial = true,
                                     height = 38.dp,
@@ -1021,6 +1023,94 @@ private fun PreviewKey(
                     Icon(icon, contentDescription = null, tint = theme.textColor, modifier = Modifier.size(16.dp))
                 } else if (text != null) {
                     Text(text, color = theme.textColor, fontSize = 13.sp, fontWeight = if (isSpecial) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+        ThemeStyle.SEMI_TRANSPARENT -> {
+            val semiBg = if (isSelected) theme.primaryColor.copy(alpha = 0.55f)
+            else if (isSpecial) theme.keySpecialColor.copy(alpha = 0.35f)
+            else theme.keyColor.copy(alpha = 0.35f)
+            Box(
+                modifier = baseModifier
+                    .clip(shape)
+                    .background(semiBg)
+                    .border(0.75.dp, theme.keyBorderColor.copy(alpha = 0.6f), shape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = theme.textColor, modifier = Modifier.size(16.dp))
+                } else if (text != null) {
+                    Text(text, color = theme.textColor, fontSize = 13.sp, fontWeight = if (isSpecial) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+        ThemeStyle.TACTILE_3D -> {
+            val keyBg = if (isSelected) theme.primaryColor else if (isSpecial) theme.keySpecialColor else theme.keyColor
+            Box(
+                modifier = baseModifier
+                    .clip(shape)
+                    .background(keyBg)
+                    .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.25f), Color.Transparent, Color.Black.copy(alpha = 0.18f))))
+                    .border(1.2.dp, theme.keyBorderColor, shape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = theme.textColor, modifier = Modifier.size(16.dp))
+                } else if (text != null) {
+                    Text(text, color = theme.textColor, fontSize = 13.sp, fontWeight = if (isSpecial) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+        ThemeStyle.CLAYMORPHISM -> {
+            val clayBg = if (isSelected) theme.primaryColor else if (isSpecial) theme.keySpecialColor else theme.keyColor
+            Box(
+                modifier = baseModifier
+                    .clip(shape)
+                    .background(clayBg)
+                    .border(1.dp, Color.White.copy(alpha = 0.45f), shape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = theme.textColor, modifier = Modifier.size(16.dp))
+                } else if (text != null) {
+                    Text(text, color = theme.textColor, fontSize = 13.sp, fontWeight = if (isSpecial) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+        ThemeStyle.FLAT_2_0 -> {
+            val flatBg = if (isSelected) theme.accentColor else if (isSpecial) theme.keySpecialColor else theme.keyColor
+            Box(
+                modifier = baseModifier
+                    .clip(shape)
+                    .background(flatBg)
+                    .border(0.8.dp, theme.keyBorderColor.copy(alpha = 0.5f), shape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = theme.textColor, modifier = Modifier.size(16.dp))
+                } else if (text != null) {
+                    Text(text, color = theme.textColor, fontSize = 13.sp, fontWeight = if (isSpecial) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+        ThemeStyle.NEOBRUTALISM -> {
+            val bruteBg = if (isSelected) theme.accentColor else if (isSpecial) theme.keySpecialColor else theme.keyColor
+            Box(
+                modifier = baseModifier
+                    .clip(shape)
+                    .background(bruteBg)
+                    .border(1.6.dp, Color.Black, shape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = theme.textColor, modifier = Modifier.size(16.dp))
+                } else if (text != null) {
+                    Text(text, color = theme.textColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

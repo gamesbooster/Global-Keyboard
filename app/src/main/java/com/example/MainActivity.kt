@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.ads.AdMobConfig
 import com.example.data.LingoKeyPreferences
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
@@ -19,30 +20,49 @@ import com.example.ui.theme.MyApplicationTheme
 class MainActivity : ComponentActivity() {
 
     private lateinit var preferences: LingoKeyPreferences
+    private var pendingDestination = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        AdMobConfig.initialize(this)
         preferences = LingoKeyPreferences.getInstance(this)
+        pendingDestination.value = intent?.getStringExtra("destination")
 
         setContent {
             val isDarkMode by preferences.isDarkMode.collectAsState()
+            val destination by pendingDestination
             MyApplicationTheme(darkTheme = isDarkMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    LingoKeyApp(preferences = preferences)
+                    LingoKeyApp(preferences = preferences, targetDestination = destination)
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val dest = intent.getStringExtra("destination")
+        if (dest != null) {
+            pendingDestination.value = dest
         }
     }
 }
 
 @Composable
-fun LingoKeyApp(preferences: LingoKeyPreferences) {
+fun LingoKeyApp(preferences: LingoKeyPreferences, targetDestination: String? = null) {
     val navController = rememberNavController()
+
+    LaunchedEffect(targetDestination) {
+        if (!targetDestination.isNullOrBlank()) {
+            navController.navigate(targetDestination)
+        }
+    }
 
     NavHost(navController = navController, startDestination = "splash") {
         composable("splash") {
@@ -77,7 +97,27 @@ fun LingoKeyApp(preferences: LingoKeyPreferences) {
                 onNavigateToPrivacy = { navController.navigate("privacy") },
                 onNavigateToPro = { navController.navigate("pro") },
                 onRestartOnboarding = { navController.navigate("onboarding") },
-                onNavigateToSmartReply = { navController.navigate("smart_reply_settings") }
+                onNavigateToSmartReply = { navController.navigate("smart_reply_settings") },
+                onNavigateToSpinAndWin = { navController.navigate("spin_and_win") },
+                onNavigateToStore = { navController.navigate("store") }
+            )
+        }
+
+        composable("store") {
+            StoreScreen(
+                preferences = preferences,
+                onBack = { navController.popBackStack() },
+                onNavigateToSpinAndWin = { navController.navigate("spin_and_win") },
+                onNavigateToPro = { navController.navigate("pro") },
+                onNavigateToThemes = { navController.navigate("themes") }
+            )
+        }
+
+        composable("spin_and_win") {
+            SpinAndWinScreen(
+                preferences = preferences,
+                onBack = { navController.popBackStack() },
+                onNavigateToPro = { navController.navigate("pro") }
             )
         }
 
@@ -92,7 +132,9 @@ fun LingoKeyApp(preferences: LingoKeyPreferences) {
             ThemesScreen(
                 preferences = preferences,
                 onBack = { navController.popBackStack() },
-                onNavigateToPro = { navController.navigate("pro") }
+                onNavigateToPro = { navController.navigate("pro") },
+                onNavigateToStore = { navController.navigate("store") },
+                onNavigateToSpinAndWin = { navController.navigate("spin_and_win") }
             )
         }
 
@@ -108,7 +150,8 @@ fun LingoKeyApp(preferences: LingoKeyPreferences) {
                 preferences = preferences,
                 onBack = { navController.popBackStack() },
                 onNavigateToPro = { navController.navigate("pro") },
-                onNavigateToSmartReply = { navController.navigate("smart_reply_settings") }
+                onNavigateToSmartReply = { navController.navigate("smart_reply_settings") },
+                onNavigateToSpinAndWin = { navController.navigate("spin_and_win") }
             )
         }
 
@@ -116,7 +159,8 @@ fun LingoKeyApp(preferences: LingoKeyPreferences) {
             SmartReplySettingsScreen(
                 preferences = preferences,
                 onBack = { navController.popBackStack() },
-                onNavigateToPro = { navController.navigate("pro") }
+                onNavigateToPro = { navController.navigate("pro") },
+                onNavigateToSpinAndWin = { navController.navigate("spin_and_win") }
             )
         }
 

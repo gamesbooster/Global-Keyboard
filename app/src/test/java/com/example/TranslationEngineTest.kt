@@ -115,10 +115,10 @@ class TranslationEngineTest {
 
     @Test
     fun testStickerCatalogIntegrity() {
-        val stickers = com.example.model.StickerData.ALL_STICKERS
+        val stickers = com.example.model.StickerCatalog.ALL_STICKERS
         assertTrue(stickers.isNotEmpty())
-        assertTrue(stickers.any { it.tag == "diwali" })
-        assertTrue(stickers.any { it.tag == "holi" })
-        assertTrue(stickers.any { it.title.contains("Arre Yaar") })
+        assertTrue(stickers.any { it.id == "fest_diwali" })
+        assertTrue(stickers.any { it.id == "fest_holi" })
+        assertTrue(stickers.any { it.title.contains("Kya Baat") })
     }
 }
