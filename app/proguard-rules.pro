@@ -14,8 +14,23 @@
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+-keepattributes SourceFile,LineNumberTable
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Preserve Data Models and Serializable classes
+-keep class com.example.model.** { *; }
+-keep class com.example.data.** { *; }
+
+# Keep Moshi JSON models
+-keepclassmembers class * {
+    @com.squareup.moshi.Json *;
+}
+
+# Keep Room Database entities and DAOs
+-keep class androidx.room.** { *; }
+-dontwarn androidx.room.**
+
+# Keep Google Play Ads
+-keep public class com.google.android.gms.ads.** {
+   public *;
+}
+-dontwarn com.google.android.gms.ads.**

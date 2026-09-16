@@ -7,19 +7,132 @@ data class ExpressiveSticker(
     val category: String,
     val iconBadge: String,
     val gradientColors: List<Long>,
-    val subtext: String = ""
+    val subtext: String = "",
+    val isUserCreated: Boolean = false
 )
 
 object StickerCatalog {
     val STICKER_CATEGORIES = listOf(
+        "🔥 Viral Memes",
         "🪔 Festivals",
         "💬 Desi Slang",
         "❤️ Love & Care",
         "☕ Chai & Fun",
-        "🎉 Celebrations"
+        "🎉 Celebrations",
+        "📌 My Templates"
     )
 
     val ALL_STICKERS = listOf(
+        // Viral Memes & Reactions
+        ExpressiveSticker(
+            id = "meme_paisa",
+            title = "Paisa Hi Paisa!",
+            textToInsert = "🤑 Paisa hi paisa hoga! 💰📈 25 din mein paisa double!",
+            category = "🔥 Viral Memes",
+            iconBadge = "🤑",
+            gradientColors = listOf(0xFF10B981, 0xFF059669),
+            subtext = "Scheme Boss"
+        ),
+        ExpressiveSticker(
+            id = "meme_badhiya",
+            title = "Yeh Badhiya Tha!",
+            textToInsert = "😂 Yeh badhiya tha guru! Top tier humour! 👏🔥",
+            category = "🔥 Viral Memes",
+            iconBadge = "😂",
+            gradientColors = listOf(0xFFF59E0B, 0xFFD97706),
+            subtext = "Classic Joke"
+        ),
+        ExpressiveSticker(
+            id = "meme_marjau",
+            title = "Kya Karu Mar Jau?",
+            textToInsert = "🤷‍♂️ Ab kya karu main, mar jau meri koi feelings nahi hai? 🥺💔",
+            category = "🔥 Viral Memes",
+            iconBadge = "🥺",
+            gradientColors = listOf(0xFFEC4899, 0xFFBE185D),
+            subtext = "Emotional Damage"
+        ),
+        ExpressiveSticker(
+            id = "meme_pakad",
+            title = "Pakad Mere Ko!",
+            textToInsert = "🏃‍♂️💨 Bhai mujhe chakkar aa rahe hain, pakad mere ko! 😵‍💫⚡",
+            category = "🔥 Viral Memes",
+            iconBadge = "🏃‍♂️",
+            gradientColors = listOf(0xFF6366F1, 0xFF4338CA),
+            subtext = "Mind Blown"
+        ),
+        ExpressiveSticker(
+            id = "meme_chotibachi",
+            title = "Choti Bachi Ho Kya?",
+            textToInsert = "🍼 Choti bachi ho kya? Samajh nahi aata? 👶😤",
+            category = "🔥 Viral Memes",
+            iconBadge = "🍼",
+            gradientColors = listOf(0xFF8B5CF6, 0xFF6D28D9),
+            subtext = "Epic Dialogue"
+        ),
+        ExpressiveSticker(
+            id = "meme_gigachad",
+            title = "Gigachad Mode",
+            textToInsert = "🗿 Gigachad mindset activated! Unbothered, focused & winning. 💪🔥",
+            category = "🔥 Viral Memes",
+            iconBadge = "🗿",
+            gradientColors = listOf(0xFF475569, 0xFF1E293B),
+            subtext = "Sigma Rule"
+        ),
+        ExpressiveSticker(
+            id = "meme_jalwa",
+            title = "Jalwa Hai Hamara!",
+            textToInsert = "😎 Jalwa hai hamara yahan! Entry aisi honi chahiye! 👑🔥",
+            category = "🔥 Viral Memes",
+            iconBadge = "😎",
+            gradientColors = listOf(0xFFEF4444, 0xFFB91C1C),
+            subtext = "Full Swag"
+        ),
+        ExpressiveSticker(
+            id = "meme_smash",
+            title = "Smash or Pass",
+            textToInsert = "😏 Smash or Pass? 100% Smash with no hesitation! 💯✨",
+            category = "🔥 Viral Memes",
+            iconBadge = "😏",
+            gradientColors = listOf(0xFFF43F5E, 0xFFE11D48),
+            subtext = "Viral Trend"
+        ),
+        ExpressiveSticker(
+            id = "meme_control",
+            title = "Control Majnu!",
+            textToInsert = "🧘‍♂️ Control Majnu control! Shant ho jao, lambi saans lo! 🕊️😅",
+            category = "🔥 Viral Memes",
+            iconBadge = "🧘‍♂️",
+            gradientColors = listOf(0xFF14B8A6, 0xFF0F766E),
+            subtext = "Stay Calm"
+        ),
+        ExpressiveSticker(
+            id = "meme_women",
+            title = "Women Haha ☕",
+            textToInsert = "☕ Women... haha! Classic moment! 😂🤝",
+            category = "🔥 Viral Memes",
+            iconBadge = "☕",
+            gradientColors = listOf(0xFFD97706, 0xFF92400E),
+            subtext = "Sip Tea"
+        ),
+        ExpressiveSticker(
+            id = "meme_chronology",
+            title = "Chronology Samajhiye",
+            textToInsert = "🧠 Aap chronology samajhiye, step by step sab clear hoga! 📊🤓",
+            category = "🔥 Viral Memes",
+            iconBadge = "🧠",
+            gradientColors = listOf(0xFF3B82F6, 0xFF1D4ED8),
+            subtext = "Masterplan"
+        ),
+        ExpressiveSticker(
+            id = "meme_beizzati",
+            title = "Gajab Beizzati!",
+            textToInsert = "🤦‍♂️ Gajab beizzati hai yaar! I can't even look in the mirror! 💀😭",
+            category = "🔥 Viral Memes",
+            iconBadge = "🤦‍♂️",
+            gradientColors = listOf(0xFFE11D48, 0xFF9F1239),
+            subtext = "Dead Roast"
+        ),
+
         // Festivals
         ExpressiveSticker(
             id = "fest_diwali",

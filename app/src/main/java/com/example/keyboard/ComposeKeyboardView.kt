@@ -108,6 +108,8 @@ fun ComposeKeyboardView(
     val autoDetectLanguage by preferences.autoDetectLanguage.collectAsState()
     val keyHeightDp by preferences.keyHeightDp.collectAsState()
     val keyPreviewEnabled by preferences.keyPreviewEnabled.collectAsState()
+    val toolbarItems by preferences.toolbarItems.collectAsState()
+    val latestClip by clipboardRepository.latestClip.collectAsState()
 
     var keyboardMode by remember { mutableStateOf(KeyboardMode.ALPHABET) }
     var isShifted by remember { mutableStateOf(false) }
@@ -130,6 +132,7 @@ fun ComposeKeyboardView(
     var voiceStatus by remember { mutableStateOf(VoiceTypingStatus.IDLE) }
     var voiceRmsLevel by remember { mutableStateOf(0f) }
     var voiceErrorMessage by remember { mutableStateOf<String?>(null) }
+    var emojiPanelInitialTab by remember { mutableStateOf("EMOJI") }
 
     // Register real-time voice recognition callbacks
     DisposableEffect(registerVoiceListener) {
@@ -281,6 +284,22 @@ fun ComposeKeyboardView(
         } else {
             refreshSuggestions("")
         }
+    }
+
+    fun handleDeleteWord() {
+        vibrate()
+        val contextBefore = onGetContextText()
+        if (contextBefore.isNotEmpty()) {
+            val trimmed = contextBefore.trimEnd()
+            val trailingSpaces = contextBefore.length - trimmed.length
+            val lastWordLen = trimmed.takeLastWhile { !it.isWhitespace() }.length
+            val toDelete = (trailingSpaces + lastWordLen).coerceIn(1, 60)
+            onDeleteSurroundingText(toDelete, 0)
+        } else {
+            onDeleteSurroundingText(1, 0)
+        }
+        currentComposingWord = ""
+        refreshSuggestions("")
     }
 
     fun handleSpace() {
@@ -442,11 +461,21 @@ fun ComposeKeyboardView(
                 }
             },
             onOpenClipboard = { keyboardMode = KeyboardMode.CLIPBOARD },
-            onOpenStickers = { keyboardMode = KeyboardMode.EMOJI },
-            onOpenEmoji = { keyboardMode = KeyboardMode.EMOJI },
+            onOpenStickers = {
+                emojiPanelInitialTab = "TEMPLATES"
+                keyboardMode = KeyboardMode.EMOJI
+            },
+            onOpenEmoji = {
+                emojiPanelInitialTab = "EMOJI"
+                keyboardMode = KeyboardMode.EMOJI
+            },
             onOpenSettings = onOpenSettings,
             onOpenTools = { keyboardMode = KeyboardMode.TOOLS_PANEL },
-            onOpenSmartReply = { keyboardMode = KeyboardMode.SMART_REPLY_PANEL }
+            onOpenSmartReply = { keyboardMode = KeyboardMode.SMART_REPLY_PANEL },
+            onOpenThemes = { onOpenThemesStore() },
+            onOpenLanguages = { keyboardMode = KeyboardMode.LANGUAGE_PANEL },
+            toolbarItems = toolbarItems,
+            onOpenCustomizeToolbar = { keyboardMode = KeyboardMode.TOOLBAR_CUSTOMIZE }
         )
 
         // DYNAMIC KEYBOARD PANEL HEIGHT (Strictly synchronized with keyHeightDp to prevent panel reduction)
@@ -463,6 +492,16 @@ fun ComposeKeyboardView(
             label = "keyboard_mode_anim"
         ) { mode ->
             when (mode) {
+                KeyboardMode.TOOLBAR_CUSTOMIZE -> {
+                    ToolbarCustomizePanel(
+                        theme = currentTheme,
+                        currentOrder = toolbarItems,
+                        onSaveOrder = { preferences.setToolbarItems(it) },
+                        onClose = { keyboardMode = KeyboardMode.ALPHABET },
+                        panelHeight = standardPanelHeight
+                    )
+                }
+
                 KeyboardMode.TOOLS_PANEL -> {
                     ToolsPanel(
                         theme = currentTheme,
@@ -484,6 +523,7 @@ fun ComposeKeyboardView(
                         },
                         onOpenLanguages = { keyboardMode = KeyboardMode.LANGUAGE_PANEL },
                         onOpenSettings = onOpenSettings,
+                        onOpenCustomizeToolbar = { keyboardMode = KeyboardMode.TOOLBAR_CUSTOMIZE },
                         onClose = { keyboardMode = KeyboardMode.ALPHABET },
                         panelHeight = standardPanelHeight
                     )
@@ -719,12 +759,14 @@ fun ComposeKeyboardView(
                 KeyboardMode.EMOJI -> {
                     EmojiPanel(
                         theme = currentTheme,
+                        preferences = preferences,
                         onEmojiClick = { emoji ->
                             vibrate()
                             onCommitText(emoji)
                         },
                         onClose = { keyboardMode = KeyboardMode.ALPHABET },
                         onDelete = { handleBackspace() },
+                        initialMode = emojiPanelInitialTab,
                         panelHeight = standardPanelHeight
                     )
                 }
@@ -774,6 +816,12 @@ fun ComposeKeyboardView(
                                 targetLang = targetTranslateLang,
                                 realtimeAutoTranslate = realtimeAutoTranslate,
                                 theme = currentTheme,
+                                latestClip = latestClip,
+                                onPasteClip = { clip ->
+                                    vibrate()
+                                    onCommitText(clip)
+                                    clipboardRepository.dismissLatestClip()
+                                },
                                 onSuggestionClick = { word, isDirectTranslation ->
                                     vibrate()
                                     if (currentComposingWord.isNotEmpty()) {
@@ -839,15 +887,20 @@ fun ComposeKeyboardView(
                             }
                         }
 
-                        // NUMBER ROW (Optional - Clean Gboard Height)
-                        if (showNumberRow && keyboardMode == KeyboardMode.ALPHABET) {
+                        // TOP QUICK ROW (Ensures 100% constant keypad height across Alphabet, Numbers, and Symbols modes)
+                        if (showNumberRow) {
+                            val topRowKeys = when (keyboardMode) {
+                                KeyboardMode.NUMBERS -> KeyboardLayouts.NUMBERS_TOP_ROW
+                                KeyboardMode.SYMBOLS -> KeyboardLayouts.SYMBOLS_TOP_ROW
+                                else -> KeyboardLayouts.NUMBER_ROW
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 2.dp, vertical = 1.dp),
                                 horizontalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
-                                for (num in KeyboardLayouts.NUMBER_ROW) {
+                                for (keyChar in topRowKeys) {
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
@@ -859,10 +912,10 @@ fun ComposeKeyboardView(
                                             isSpecial = false,
                                             isSelected = false,
                                             height = (currentKeyHeight * 0.78f).coerceAtLeast(36.dp),
-                                            onClick = { handleKeyPress(num) }
+                                            onClick = { handleKeyPress(keyChar) }
                                         ) {
                                             Text(
-                                                text = num,
+                                                text = keyChar,
                                                 color = currentTheme.textColor,
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Medium
@@ -972,14 +1025,15 @@ fun ComposeKeyboardView(
                                     )
                                 }
 
-                                // Right modifier on last row (Backspace with accelerating hold-to-delete)
+                                // Right modifier on last row (Backspace with accelerating hold-to-delete & swipe-to-delete-word)
                                 if (isLastRow) {
                                     val modWeight = ((10f - rowKeys.size) / 2f).coerceIn(1.3f, 1.55f)
                                     KeyBackspaceButton(
                                         modifier = Modifier.weight(modWeight),
                                         theme = currentTheme,
                                         height = currentKeyHeight,
-                                        onDelete = { handleBackspace() }
+                                        onDelete = { handleBackspace() },
+                                        onDeleteWord = { handleDeleteWord() }
                                     )
                                 }
 
@@ -993,7 +1047,7 @@ fun ComposeKeyboardView(
                             }
                         }
 
-                        // BOTTOM ACTION ROW (Clean Gboard Layout with Cursor Scrubbing)
+                        // BOTTOM ACTION ROW (Clean Gboard Layout with Cursor Scrubbing & Language Switch)
                         BottomActionRow(
                             theme = currentTheme,
                             keyboardMode = keyboardMode,
@@ -1010,6 +1064,10 @@ fun ComposeKeyboardView(
                             onSwitchLanguage = {
                                 vibrate()
                                 preferences.switchNextLanguage()
+                            },
+                            onOpenLanguagePanel = {
+                                vibrate()
+                                keyboardMode = KeyboardMode.LANGUAGE_PANEL
                             },
                             onSpace = { handleSpace() },
                             onOpenEmoji = {
@@ -1060,7 +1118,11 @@ fun SmartToolbar(
     onOpenEmoji: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenTools: () -> Unit = {},
-    onOpenSmartReply: () -> Unit = {}
+    onOpenSmartReply: () -> Unit = {},
+    onOpenThemes: () -> Unit = {},
+    onOpenLanguages: () -> Unit = {},
+    toolbarItems: List<String> = emptyList(),
+    onOpenCustomizeToolbar: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -1071,174 +1133,210 @@ fun SmartToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // MULTILINGUAL SELECTOR PILL: [🌐 Auto / EN ⇄ HI ▾]
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = theme.primaryColor.copy(alpha = 0.2f),
-            border = BorderStroke(1.dp, theme.primaryColor.copy(alpha = 0.6f)),
-            modifier = Modifier.clickable { onOpenLanguagePicker() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(if (autoDetectLanguage) "🌐 Auto" else activeLanguage.flagEmoji, fontSize = 12.sp)
-                Text(
-                    text = if (realtimeAutoTranslate) "→ ${targetTranslateLang.flagEmoji} ${targetTranslateLang.code.uppercase()}" else activeLanguage.code.uppercase(),
-                    color = theme.textColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Icon(
-                    Icons.Default.ArrowDropDown,
-                    contentDescription = "Select Language",
-                    tint = theme.accentColor,
-                    modifier = Modifier.size(14.dp)
-                )
+        // DYNAMIC CUSTOMIZABLE TOOLBAR ITEMS
+        val effectiveItems = if (toolbarItems.isEmpty()) {
+            listOf("translate", "smart_reply", "ai", "tools", "voice", "stickers", "settings")
+        } else {
+            toolbarItems
+        }
+
+        for (itemId in effectiveItems) {
+            when (itemId) {
+                "translate" -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (realtimeAutoTranslate) theme.primaryColor else theme.keyColor,
+                        modifier = Modifier.clickable { onToggleRealtimeTranslate() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Translate,
+                                contentDescription = "Translate",
+                                tint = if (realtimeAutoTranslate) Color.White else theme.accentColor,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = if (realtimeAutoTranslate) "Translating" else "Translate",
+                                color = if (realtimeAutoTranslate) Color.White else theme.textColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                "smart_reply" -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF6366F1).copy(alpha = 0.22f),
+                        border = BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable { onOpenSmartReply() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Smart Reply", tint = Color(0xFF818CF8), modifier = Modifier.size(14.dp))
+                            Text("Smart Reply", color = Color(0xFF818CF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                "ai" -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = theme.keySpecialColor,
+                        modifier = Modifier.clickable { onOpenAI() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "AI", tint = theme.accentColor, modifier = Modifier.size(15.dp))
+                            Text("AI", color = theme.textColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                "tools" -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = theme.keySpecialColor,
+                        modifier = Modifier.clickable { onOpenTools() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(Icons.Default.Widgets, contentDescription = "Tools", tint = theme.accentColor, modifier = Modifier.size(14.dp))
+                            Text("Tools", color = theme.textColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                "voice" -> {
+                    IconButton(
+                        onClick = onOpenVoice,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = theme.accentColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+                "stickers" -> {
+                    IconButton(
+                        onClick = onOpenStickers,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.Celebration, contentDescription = "Templates", tint = theme.accentColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+                "settings" -> {
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = theme.textSecondaryColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+                "lang_selector" -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = theme.primaryColor.copy(alpha = 0.2f),
+                        border = BorderStroke(1.dp, theme.primaryColor.copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable { onOpenLanguagePicker() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(if (autoDetectLanguage) "🌐 Auto" else activeLanguage.flagEmoji, fontSize = 12.sp)
+                            Text(
+                                text = if (realtimeAutoTranslate) "→ ${targetTranslateLang.flagEmoji} ${targetTranslateLang.code.uppercase()}" else activeLanguage.code.uppercase(),
+                                color = theme.textColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = "Select Language",
+                                tint = theme.accentColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+                "tts_speech" -> {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981).copy(alpha = 0.2f) else theme.keyColor,
+                        border = BorderStroke(1.dp, if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981) else theme.keyBorderColor),
+                        modifier = Modifier.clickable { onToggleRealtimeTTS() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                if (realtimeTTSMode != RealtimeTTSMode.OFF) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
+                                contentDescription = "TTS Voice",
+                                tint = if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981) else theme.textSecondaryColor,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = if (realtimeTTSMode != RealtimeTTSMode.OFF) "Live Voice" else "Voice Muted",
+                                color = if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981) else theme.textColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                "clipboard" -> {
+                    IconButton(
+                        onClick = onOpenClipboard,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = "Clipboard", tint = theme.textColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+                "emoji" -> {
+                    IconButton(
+                        onClick = onOpenEmoji,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.SentimentSatisfied, contentDescription = "Emoji", tint = theme.textColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+                "themes" -> {
+                    IconButton(
+                        onClick = onOpenThemes,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.Palette, contentDescription = "Themes", tint = theme.accentColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+                "languages" -> {
+                    IconButton(
+                        onClick = onOpenLanguages,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.Language, contentDescription = "Languages", tint = theme.accentColor, modifier = Modifier.size(16.dp))
+                    }
+                }
             }
         }
 
-        // REALTIME VOICE TTS SPEECH TOGGLE PILL
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981).copy(alpha = 0.2f) else theme.keyColor,
-            border = BorderStroke(1.dp, if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981) else theme.keyBorderColor),
-            modifier = Modifier.clickable { onToggleRealtimeTTS() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    if (realtimeTTSMode != RealtimeTTSMode.OFF) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
-                    contentDescription = "TTS Voice",
-                    tint = if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981) else theme.textSecondaryColor,
-                    modifier = Modifier.size(15.dp)
-                )
-                Text(
-                    text = if (realtimeTTSMode != RealtimeTTSMode.OFF) "Live Voice" else "Voice Muted",
-                    color = if (realtimeTTSMode != RealtimeTTSMode.OFF) Color(0xFF10B981) else theme.textColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        // REALTIME TRANSLATE TOGGLE PILL
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = if (realtimeAutoTranslate) theme.primaryColor else theme.keyColor,
-            modifier = Modifier.clickable { onToggleRealtimeTranslate() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    Icons.Default.Translate,
-                    contentDescription = "Translate",
-                    tint = if (realtimeAutoTranslate) Color.White else theme.accentColor,
-                    modifier = Modifier.size(15.dp)
-                )
-                Text(
-                    text = if (realtimeAutoTranslate) "Translating" else "Translate",
-                    color = if (realtimeAutoTranslate) Color.White else theme.textColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        // TOOLS BUTTON: [ 🛠 Tools ]
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = theme.keySpecialColor,
-            modifier = Modifier.clickable { onOpenTools() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                Icon(Icons.Default.Widgets, contentDescription = "Tools", tint = theme.accentColor, modifier = Modifier.size(14.dp))
-                Text("Tools", color = theme.textColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // SMART REPLY QUICK BUTTON: [ ✨ Reply ]
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = Color(0xFF6366F1).copy(alpha = 0.22f),
-            border = BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.6f)),
-            modifier = Modifier.clickable { onOpenSmartReply() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = "Smart Reply", tint = Color(0xFF818CF8), modifier = Modifier.size(14.dp))
-                Text("Smart Reply", color = Color(0xFF818CF8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // AI Assistant Button
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = theme.keySpecialColor,
-            modifier = Modifier.clickable { onOpenAI() }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = "AI", tint = theme.accentColor, modifier = Modifier.size(15.dp))
-                Text("AI", color = theme.textColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // Voice Mic
+        // TOOLBAR CUSTOMIZE SHORTCUT
         IconButton(
-            onClick = onOpenVoice,
+            onClick = onOpenCustomizeToolbar,
             modifier = Modifier.size(30.dp)
         ) {
-            Icon(Icons.Default.Mic, contentDescription = "Voice Input", tint = theme.accentColor, modifier = Modifier.size(16.dp))
-        }
-
-        // Clipboard
-        IconButton(
-            onClick = onOpenClipboard,
-            modifier = Modifier.size(30.dp)
-        ) {
-            Icon(Icons.Default.ContentPaste, contentDescription = "Clipboard", tint = theme.textColor, modifier = Modifier.size(16.dp))
-        }
-
-        // Stickers & Festivals
-        IconButton(
-            onClick = onOpenStickers,
-            modifier = Modifier.size(30.dp)
-        ) {
-            Icon(Icons.Default.Celebration, contentDescription = "Stickers", tint = theme.accentColor, modifier = Modifier.size(16.dp))
-        }
-
-        // Emoji
-        IconButton(
-            onClick = onOpenEmoji,
-            modifier = Modifier.size(30.dp)
-        ) {
-            Icon(Icons.Default.SentimentSatisfied, contentDescription = "Emoji", tint = theme.textColor, modifier = Modifier.size(16.dp))
-        }
-
-        // Settings
-        IconButton(
-            onClick = onOpenSettings,
-            modifier = Modifier.size(30.dp)
-        ) {
-            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = theme.textSecondaryColor, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Tune, contentDescription = "Customize Toolbar", tint = theme.accentColor, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -1251,6 +1349,8 @@ fun SuggestionBar(
     targetLang: Language,
     realtimeAutoTranslate: Boolean,
     theme: KeyboardTheme,
+    latestClip: String? = null,
+    onPasteClip: (String) -> Unit = {},
     onSuggestionClick: (String, Boolean) -> Unit
 ) {
     var liveTrans by remember(currentComposingWord, activeLanguage.code, targetLang.code) {
@@ -1281,7 +1381,48 @@ fun SuggestionBar(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Live Translation Highlight Candidate Chip
+        // 1. SMART PASTE SUGGESTION PILL (Gboard Style)
+        val hasSmartPaste = currentComposingWord.isBlank() && !latestClip.isNullOrBlank()
+        if (hasSmartPaste && latestClip != null) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = theme.primaryColor.copy(alpha = 0.16f),
+                border = BorderStroke(1.dp, theme.primaryColor.copy(alpha = 0.55f)),
+                modifier = Modifier
+                    .weight(1.8f)
+                    .clickable { onPasteClip(latestClip) }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ContentPaste,
+                        contentDescription = "Paste",
+                        tint = theme.primaryColor,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = latestClip.replace("\n", " ").trim(),
+                        color = theme.textColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Paste",
+                        color = theme.primaryColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 2. Live Translation Highlight Candidate Chip
         val currentTrans = liveTrans
         if (currentTrans != null) {
             Surface(
@@ -1316,13 +1457,17 @@ fun SuggestionBar(
             }
         }
 
-        // 2. Regular Suggestions
+        // 3. Regular Suggestions
         val rawSuggestions = if (suggestions.isEmpty()) {
             listOf("I", "How", "Thank you")
         } else {
             suggestions
         }
-        val displaySuggestions = if (liveTrans != null) rawSuggestions.take(3) else rawSuggestions.take(4)
+        val displaySuggestions = when {
+            hasSmartPaste && liveTrans != null -> rawSuggestions.take(1)
+            hasSmartPaste || liveTrans != null -> rawSuggestions.take(2)
+            else -> rawSuggestions.take(4)
+        }
         displaySuggestions.forEachIndexed { index, suggestion ->
             val isPrimary = if (displaySuggestions.size >= 3) index == 1 else index == 0
             Box(
@@ -1871,17 +2016,19 @@ fun KeyBackspaceButton(
     modifier: Modifier = Modifier,
     theme: KeyboardTheme,
     height: Dp = 48.dp,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onDeleteWord: () -> Unit = {}
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    var isSwipingWord by remember { mutableStateOf(false) }
 
     LaunchedEffect(isPressed) {
-        if (isPressed) {
+        if (isPressed && !isSwipingWord) {
             onDelete()
             // Wait 300ms initial long-press hold before fast repeat
             kotlinx.coroutines.delay(300)
             var deleteCount = 0
-            while (isPressed) {
+            while (isPressed && !isSwipingWord) {
                 onDelete()
                 deleteCount++
                 val delayMs = when {
@@ -1898,13 +2045,39 @@ fun KeyBackspaceButton(
         modifier = modifier
             .height(height)
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        tryAwaitRelease()
-                        isPressed = false
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    isSwipingWord = false
+                    var totalDragX = 0f
+                    var wordsDeleted = 0
+                    val wordSwipeThreshold = 38f // px threshold to trigger word deletion
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+
+                        val deltaX = change.position.x - change.previousPosition.x
+                        totalDragX += deltaX
+
+                        // Left swipe detection (negative X)
+                        if (totalDragX < -wordSwipeThreshold) {
+                            isSwipingWord = true
+                            val steps = ((-totalDragX) / wordSwipeThreshold).toInt()
+                            if (steps > wordsDeleted) {
+                                val toDelete = steps - wordsDeleted
+                                repeat(toDelete) {
+                                    onDeleteWord()
+                                }
+                                wordsDeleted = steps
+                            }
+                        }
                     }
-                )
+
+                    isPressed = false
+                    isSwipingWord = false
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -1917,17 +2090,26 @@ fun KeyBackspaceButton(
                 theme = theme,
                 modifier = Modifier.fillMaxSize(),
                 isSpecial = true,
-                isSelected = false,
+                isSelected = isSwipingWord,
                 isPressed = isPressed,
                 height = height,
                 onClick = null
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Backspace,
-                    contentDescription = "Backspace",
-                    tint = theme.textColor,
-                    modifier = Modifier.size(19.dp)
-                )
+                if (isSwipingWord) {
+                    Text(
+                        text = "‹ Word",
+                        color = theme.accentColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Backspace,
+                        contentDescription = "Backspace",
+                        tint = theme.textColor,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
         }
     }
@@ -1945,6 +2127,7 @@ fun BottomActionRow(
     onMoveCursor: (Int) -> Unit = {},
     onSwitchMode: (KeyboardMode) -> Unit,
     onSwitchLanguage: () -> Unit,
+    onOpenLanguagePanel: () -> Unit = {},
     onSpace: () -> Unit,
     onOpenEmoji: () -> Unit,
     onEnter: () -> Unit
@@ -1970,50 +2153,90 @@ fun BottomActionRow(
             }
         )
 
-        // Language Globe Button
-        KeySpecialButton(
-            icon = Icons.Default.Language,
-            modifier = Modifier.weight(1f),
-            theme = theme,
-            height = height,
-            onClick = onSwitchLanguage
-        )
+        // Language Globe Button (Tap to cycle language, Long-press to open full language panel)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(height)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onSwitchLanguage() },
+                        onLongPress = { onOpenLanguagePanel() }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 2.dp, vertical = 2.dp)
+            ) {
+                ThemedKeyBox(
+                    theme = theme,
+                    modifier = Modifier.fillMaxSize(),
+                    isSpecial = true,
+                    isSelected = false,
+                    height = height,
+                    onClick = null
+                ) {
+                    Icon(
+                        Icons.Default.Language,
+                        contentDescription = "Language",
+                        tint = theme.textColor,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
+        }
 
-        // Space Bar with Cursor Scrubbing & Indic / Hinglish Label
+        // Space Bar with Cursor Scrubbing & Long-Press Language Selection
         Box(
             modifier = Modifier
                 .weight(4.7f)
                 .height(height)
                 .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        isSpacePressed = true
-                        var totalDragX = 0f
-                        var didDrag = false
-                        val dragThreshold = 20f
+                    kotlinx.coroutines.coroutineScope {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            isSpacePressed = true
+                            var totalDragX = 0f
+                            var didDrag = false
+                            var didLongPress = false
+                            val dragThreshold = 20f
 
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-
-                            val deltaX = change.position.x - change.previousPosition.x
-                            totalDragX += deltaX
-
-                            if (Math.abs(totalDragX) >= dragThreshold) {
-                                didDrag = true
-                                isDraggingCursor = true
-                                val step = if (totalDragX > 0) 1 else -1
-                                onMoveCursor(step)
-                                totalDragX = 0f
+                            val longPressTimer = this@coroutineScope.launch {
+                                kotlinx.coroutines.delay(400)
+                                if (!didDrag) {
+                                    didLongPress = true
+                                    onOpenLanguagePanel()
+                                }
                             }
-                        }
 
-                        if (!didDrag) {
-                            onSpace()
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+
+                                val deltaX = change.position.x - change.previousPosition.x
+                                totalDragX += deltaX
+
+                                if (Math.abs(totalDragX) >= dragThreshold) {
+                                    longPressTimer.cancel()
+                                    didDrag = true
+                                    isDraggingCursor = true
+                                    val step = if (totalDragX > 0) 1 else -1
+                                    onMoveCursor(step)
+                                    totalDragX = 0f
+                                }
+                            }
+
+                            longPressTimer.cancel()
+                            if (!didDrag && !didLongPress) {
+                                onSpace()
+                            }
+                            isSpacePressed = false
+                            isDraggingCursor = false
                         }
-                        isSpacePressed = false
-                        isDraggingCursor = false
                     }
                 },
             contentAlignment = Alignment.Center
@@ -2051,7 +2274,7 @@ fun BottomActionRow(
                             )
                         }
                     } else {
-                        val translitSuffix = if (isTransliterationActive) " (Hinglish)" else ""
+                        val translitSuffix = if (isTransliterationActive && activeLanguage.id != "en") " (${activeLanguage.nativeName})" else ""
                         Text(
                             text = "${activeLanguage.flagEmoji} ${activeLanguage.displayName}$translitSuffix",
                             color = theme.textSecondaryColor,
@@ -3101,15 +3324,40 @@ fun VoicePanel(
 @Composable
 fun EmojiPanel(
     theme: KeyboardTheme,
+    preferences: LingoKeyPreferences,
     onEmojiClick: (String) -> Unit,
     onClose: () -> Unit,
     onDelete: () -> Unit,
+    initialMode: String = "EMOJI",
     panelHeight: Dp = 265.dp
 ) {
-    var mediaMode by remember { mutableStateOf("EMOJI") } // EMOJI, STICKERS, KAOMOJI
+    var mediaMode by remember(initialMode) {
+        mutableStateOf(if (initialMode == "STICKERS") "TEMPLATES" else initialMode)
+    }
     var selectedCategory by remember { mutableStateOf("Smileys") }
-    var selectedStickerCategory by remember { mutableStateOf("🪔 Festivals") }
+    var selectedStickerCategory by remember { mutableStateOf(StickerCatalog.STICKER_CATEGORIES.first()) }
     val categories = KeyboardLayouts.EMOJI_CATEGORIES.keys.toList()
+
+    val userCustomCards by preferences.customCardTemplates.collectAsState()
+    var isCreatingTemplate by remember { mutableStateOf(false) }
+    var newTitle by remember { mutableStateOf("") }
+    var newSubtext by remember { mutableStateOf("") }
+    var newContent by remember { mutableStateOf("") }
+    var newCategory by remember { mutableStateOf("📌 My Templates") }
+    var newBadgeEmoji by remember { mutableStateOf("🪔") }
+    val gradientPalette = remember {
+        listOf(
+            listOf(0xFFF59E0B, 0xFFD97706), // Amber Golden
+            listOf(0xFFF97316, 0xFFEA580C), // Sunset Orange
+            listOf(0xFF6366F1, 0xFF4F46E5), // Royal Indigo
+            listOf(0xFF8B5CF6, 0xFF6D28D9), // Purple Violet
+            listOf(0xFF10B981, 0xFF059669), // Emerald Green
+            listOf(0xFFEC4899, 0xFFBE185D), // Rose Pink
+            listOf(0xFF0EA5E9, 0xFF0284C7), // Ocean Cyan
+            listOf(0xFFEF4444, 0xFFDC2626)  // Crimson Red
+        )
+    }
+    var selectedGradientIndex by remember { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -3118,7 +3366,7 @@ fun EmojiPanel(
             .background(theme.backgroundColor)
             .padding(horizontal = 6.dp, vertical = 4.dp)
     ) {
-        // 1. TOP MEDIA SEGMENT TABS (Emojis, Desi Stickers & GIFs, Kaomoji)
+        // 1. TOP MEDIA SEGMENT TABS (Emojis & Templates)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3128,11 +3376,10 @@ fun EmojiPanel(
         ) {
             val tabs = listOf(
                 Triple("EMOJI", "😊 Emojis", Icons.Default.SentimentSatisfied),
-                Triple("STICKERS", "✨ Stickers & Desi", Icons.Default.AutoAwesome),
-                Triple("KAOMOJI", "(◕‿◕) Kaomoji", Icons.Default.Mood)
+                Triple("TEMPLATES", "🎨 Templates", Icons.Default.Celebration)
             )
 
-            for ((tabKey, tabLabel, tabIcon) in tabs) {
+            for ((tabKey, tabLabel, _) in tabs) {
                 val isSelected = mediaMode == tabKey
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -3143,17 +3390,20 @@ fun EmojiPanel(
                     ),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { mediaMode = tabKey }
+                        .clickable {
+                            mediaMode = tabKey
+                            isCreatingTemplate = false
+                        }
                 ) {
                     Row(
-                        modifier = Modifier.padding(vertical = 5.dp, horizontal = 4.dp),
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = tabLabel,
                             color = if (isSelected) Color.White else theme.textColor,
-                            fontSize = 11.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1
                         )
@@ -3163,60 +3413,49 @@ fun EmojiPanel(
         }
 
         when (mediaMode) {
-            "STICKERS" -> {
-                // Sticker Category Chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    for (cat in StickerCatalog.STICKER_CATEGORIES) {
-                        val isCatSelected = selectedStickerCategory == cat
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (isCatSelected) theme.accentColor else theme.surfaceColor,
-                            modifier = Modifier.clickable { selectedStickerCategory = cat }
+            "TEMPLATES" -> {
+                if (isCreatingTemplate) {
+                    // Inline Card Template Creator
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = cat,
-                                color = if (isCatSelected) Color.White else theme.textColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                "➕ Create Card Template",
+                                color = theme.accentColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp
                             )
+                            IconButton(
+                                onClick = { isCreatingTemplate = false },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = theme.textSecondaryColor, modifier = Modifier.size(16.dp))
+                            }
                         }
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Stickers Grid
-                val filteredStickers = StickerCatalog.ALL_STICKERS.filter { it.category == selectedStickerCategory }
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(filteredStickers) { sticker ->
-                        val brush = Brush.linearGradient(
-                            listOf(Color(sticker.gradientColors.first()), Color(sticker.gradientColors.last()))
-                        )
+                        // Live Card Preview
+                        val activeGradient = gradientPalette[selectedGradientIndex]
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(64.dp)
-                                .clickable { onEmojiClick(sticker.textToInsert) },
+                                .height(56.dp),
                             shadowElevation = 2.dp
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(brush)
+                                    .background(Brush.linearGradient(listOf(Color(activeGradient[0]), Color(activeGradient[1]))))
                                     .padding(horizontal = 8.dp, vertical = 6.dp)
                             ) {
                                 Row(
@@ -3224,64 +3463,366 @@ fun EmojiPanel(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(
-                                        text = sticker.iconBadge,
-                                        fontSize = 24.sp
-                                    )
-                                    Column(
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
+                                    Text(text = newBadgeEmoji, fontSize = 22.sp)
+                                    Column(verticalArrangement = Arrangement.Center) {
                                         Text(
-                                            text = sticker.title,
+                                            text = if (newTitle.isBlank()) "Card Template Title" else newTitle,
                                             color = Color.White,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        if (sticker.subtext.isNotEmpty()) {
-                                            Text(
-                                                text = sticker.subtext,
-                                                color = Color.White.copy(alpha = 0.85f),
-                                                fontSize = 10.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
+                                        Text(
+                                            text = if (newSubtext.isBlank()) (if (newContent.isBlank()) "Preview text to insert..." else newContent) else newSubtext,
+                                            color = Color.White.copy(alpha = 0.85f),
+                                            fontSize = 9.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Title Input
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = theme.surfaceColor,
+                            border = BorderStroke(0.75.dp, theme.keyBorderColor),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+                                if (newTitle.isEmpty()) {
+                                    Text("Title (e.g. Festival Wish, Slang Reply)", color = theme.textSecondaryColor, fontSize = 11.sp)
+                                }
+                                BasicTextField(
+                                    value = newTitle,
+                                    onValueChange = { newTitle = it },
+                                    textStyle = TextStyle(color = theme.textColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                            }
+                        }
+
+                        // Subtext / Tagline Input
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = theme.surfaceColor,
+                            border = BorderStroke(0.75.dp, theme.keyBorderColor),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+                                if (newSubtext.isEmpty()) {
+                                    Text("Subtext (optional e.g. Greeting, Fun Tag)", color = theme.textSecondaryColor, fontSize = 11.sp)
+                                }
+                                BasicTextField(
+                                    value = newSubtext,
+                                    onValueChange = { newSubtext = it },
+                                    textStyle = TextStyle(color = theme.textColor, fontSize = 11.sp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                            }
+                        }
+
+                        // Content Input (Message text to insert)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = theme.surfaceColor,
+                            border = BorderStroke(0.75.dp, theme.keyBorderColor),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+                                if (newContent.isEmpty()) {
+                                    Text("Message text to insert when tapped...", color = theme.textSecondaryColor, fontSize = 11.sp)
+                                }
+                                BasicTextField(
+                                    value = newContent,
+                                    onValueChange = { newContent = it },
+                                    textStyle = TextStyle(color = theme.textColor, fontSize = 11.sp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 38.dp)
+                                )
+                            }
+                        }
+
+                        // Badge Emoji Selector
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val badgeList = listOf("🪔", "✨", "🌟", "🎂", "❤️", "💼", "☕", "🚀", "💬", "🎁", "⚡", "🥳", "🔥", "💰", "🌸", "🙏", "🎉", "💐")
+                            for (b in badgeList) {
+                                val isBadgeSelected = newBadgeEmoji == b
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isBadgeSelected) theme.primaryColor.copy(alpha = 0.3f) else theme.surfaceColor,
+                                    border = BorderStroke(0.8.dp, if (isBadgeSelected) theme.primaryColor else Color.Transparent),
+                                    modifier = Modifier.clickable { newBadgeEmoji = b }
+                                ) {
+                                    Text(b, fontSize = 15.sp, modifier = Modifier.padding(4.dp))
+                                }
+                            }
+                        }
+
+                        // Gradient Palette Selector
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            for ((idx, grad) in gradientPalette.withIndex()) {
+                                val isGradSelected = selectedGradientIndex == idx
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Brush.linearGradient(listOf(Color(grad[0]), Color(grad[1]))))
+                                        .border(
+                                            width = if (isGradSelected) 2.dp else 0.5.dp,
+                                            color = if (isGradSelected) Color.White else Color.Transparent,
+                                            shape = CircleShape
+                                        )
+                                        .clickable { selectedGradientIndex = idx }
+                                )
+                            }
+                        }
+
+                        // Category selection chips
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            for (cat in StickerCatalog.STICKER_CATEGORIES) {
+                                val isSelected = newCategory == cat
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSelected) theme.accentColor else theme.surfaceColor,
+                                    modifier = Modifier.clickable { newCategory = cat }
+                                ) {
+                                    Text(
+                                        text = cat,
+                                        color = if (isSelected) Color.White else theme.textColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = theme.surfaceColor,
+                                modifier = Modifier
+                                    .clickable { isCreatingTemplate = false }
+                                    .padding(end = 6.dp)
+                            ) {
+                                Text("Cancel", color = theme.textSecondaryColor, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+
+                            val canSave = newTitle.isNotBlank() && (newContent.isNotBlank() || newSubtext.isNotBlank())
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (canSave) theme.primaryColor else theme.primaryColor.copy(alpha = 0.4f),
+                                modifier = Modifier.clickable(enabled = canSave) {
+                                    val textToSave = newContent.ifBlank { newTitle }
+                                    val subtextToSave = newSubtext.ifBlank { newTitle }
+                                    preferences.saveCustomCardTemplate(
+                                        title = newTitle,
+                                        textToInsert = textToSave,
+                                        category = newCategory,
+                                        iconBadge = newBadgeEmoji,
+                                        gradientColors = gradientPalette[selectedGradientIndex],
+                                        subtext = subtextToSave
+                                    )
+                                    selectedStickerCategory = newCategory
+                                    newTitle = ""
+                                    newSubtext = ""
+                                    newContent = ""
+                                    isCreatingTemplate = false
+                                }
+                            ) {
+                                Text("💾 Save Template", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                            }
+                        }
+                    }
+                } else {
+                    // Category Chips Bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        for (cat in StickerCatalog.STICKER_CATEGORIES) {
+                            val isCatSelected = selectedStickerCategory == cat
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isCatSelected) theme.accentColor else theme.surfaceColor,
+                                modifier = Modifier.clickable { selectedStickerCategory = cat }
+                            ) {
+                                Text(
+                                    text = cat,
+                                    color = if (isCatSelected) Color.White else theme.textColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Cards Container with Floating '+' FAB
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        val displayCards = remember(selectedStickerCategory, userCustomCards) {
+                            if (selectedStickerCategory == "📌 My Templates") {
+                                userCustomCards
+                            } else {
+                                val userCardsInCat = userCustomCards.filter { it.category == selectedStickerCategory }
+                                val builtInCardsInCat = StickerCatalog.ALL_STICKERS.filter { it.category == selectedStickerCategory }
+                                userCardsInCat + builtInCardsInCat
+                            }
+                        }
+
+                        if (displayCards.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("No templates in this category yet", color = theme.textSecondaryColor, fontSize = 12.sp)
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = theme.primaryColor.copy(alpha = 0.15f),
+                                        modifier = Modifier.clickable { isCreatingTemplate = true }
+                                    ) {
+                                        Text("➕ Create your first card template", color = theme.accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                    }
+                                }
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                contentPadding = PaddingValues(bottom = 54.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                items(displayCards, key = { it.id }) { sticker ->
+                                    val brush = Brush.linearGradient(
+                                        listOf(Color(sticker.gradientColors.first()), Color(sticker.gradientColors.last()))
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(64.dp)
+                                            .clickable { onEmojiClick(sticker.textToInsert) },
+                                        shadowElevation = 2.dp
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(brush)
+                                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxSize(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = sticker.iconBadge,
+                                                    fontSize = 24.sp
+                                                )
+                                                Column(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
+                                                    Text(
+                                                        text = sticker.title,
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    if (sticker.subtext.isNotEmpty()) {
+                                                        Text(
+                                                            text = sticker.subtext,
+                                                            color = Color.White.copy(alpha = 0.85f),
+                                                            fontSize = 10.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            if (sticker.isUserCreated) {
+                                                IconButton(
+                                                    onClick = { preferences.deleteCustomCardTemplate(sticker.id) },
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .align(Alignment.TopEnd)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Delete,
+                                                        contentDescription = "Delete Template",
+                                                        tint = Color.White.copy(alpha = 0.85f),
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                }
-            }
 
-            "KAOMOJI" -> {
-                val kaomojis = KeyboardLayouts.EMOJI_CATEGORIES["Kaomoji"] ?: emptyList()
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(kaomojis) { kaomoji ->
+                        // Floating '+' Icon fixed at the keyboard right bottom corner
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = theme.surfaceColor,
-                            border = BorderStroke(0.5.dp, theme.keyBorderColor),
+                            shape = CircleShape,
+                            color = theme.primaryColor,
+                            shadowElevation = 6.dp,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .clickable { onEmojiClick(kaomoji) }
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 8.dp, bottom = 6.dp)
+                                .size(46.dp)
+                                .clickable { isCreatingTemplate = true }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = kaomoji,
-                                    color = theme.textColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "Create Card Template",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }
@@ -3359,109 +3900,6 @@ fun EmojiPanel(
 
             IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                 Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = theme.textColor)
-            }
-        }
-    }
-}
-
-@Composable
-fun ClipboardPanel(
-    theme: KeyboardTheme,
-    clipboardRepository: ClipboardRepository,
-    onPaste: (String) -> Unit,
-    onClose: () -> Unit,
-    panelHeight: Dp = 265.dp
-) {
-    val items by clipboardRepository.items.collectAsState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(panelHeight)
-            .background(theme.backgroundColor)
-            .padding(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.ContentPaste, contentDescription = null, tint = theme.accentColor, modifier = Modifier.size(18.dp))
-                Text("Clipboard History", color = theme.textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
-
-            Row {
-                TextButton(onClick = { clipboardRepository.clearAll() }) {
-                    Text("Clear", color = Color(0xFFEF4444), fontSize = 12.sp)
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = theme.textSecondaryColor)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        if (items.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No copied clips yet", color = theme.textSecondaryColor, fontSize = 12.sp)
-            }
-        } else {
-            LazyRow(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(items) { item ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = theme.surfaceColor),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .width(160.dp)
-                            .fillMaxHeight()
-                            .clickable { onPaste(item.text) }
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = item.text,
-                                color = theme.textColor,
-                                fontSize = 12.sp,
-                                maxLines = 4,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (item.isPinned) {
-                                    Icon(Icons.Default.PushPin, contentDescription = "Pinned", tint = theme.accentColor, modifier = Modifier.size(12.dp))
-                                }
-                                IconButton(
-                                    onClick = { clipboardRepository.togglePin(item.id) },
-                                    modifier = Modifier.size(20.dp)
-                                ) {
-                                    Icon(
-                                        if (item.isPinned) Icons.Default.PushPin else Icons.Default.PushPin,
-                                        contentDescription = "Pin",
-                                        tint = if (item.isPinned) theme.primaryColor else theme.textSecondaryColor,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     }

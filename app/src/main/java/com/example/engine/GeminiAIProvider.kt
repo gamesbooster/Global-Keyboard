@@ -33,7 +33,7 @@ class GeminiAIProvider(
         } catch (e: Exception) {
             null
         }
-        return if (!key.isNullOrBlank() && key != "MY_GEMINI_API_KEY") key else null
+        return if (!key.isNullOrBlank() && key != "MY_GEMINI_API_KEY" && key != "your_api_key_here") key else null
     }
 
     private suspend fun callGemini(prompt: String, systemInstruction: String? = null): Result<String> = withContext(Dispatchers.IO) {

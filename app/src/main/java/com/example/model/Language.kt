@@ -15,9 +15,9 @@ enum class LayoutType {
 }
 
 enum class LanguageCategory(val displayName: String) {
-    ALL("All Languages"),
-    INDIAN("Indian Languages"),
-    GLOBAL("Global & World")
+    ALL("All"),
+    GLOBAL("Global"),
+    INDIAN("Regional")
 }
 
 data class Language(
@@ -33,24 +33,13 @@ data class Language(
 ) {
     companion object {
         val ALL_LANGUAGES = listOf(
-            // --- Primary & Indian Languages ---
+            // --- Top Priority Languages (English + Top 3) ---
             Language("en", "en", "English", "English", "🇺🇸", LayoutType.QWERTY, true, "en-US", isGlobal = true),
             Language("hi", "hi", "Hindi", "हिन्दी", "🇮🇳", LayoutType.DEVANAGARI, true, "hi-IN", isGlobal = false),
             Language("mr", "mr", "Marathi", "मराठी", "🇮🇳", LayoutType.DEVANAGARI, false, "mr-IN", isGlobal = false),
             Language("bn", "bn", "Bengali", "বাংলা", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false),
-            Language("gu", "gu", "Gujarati", "ગુજરાતી", "🇮🇳", LayoutType.GUJARATI, false, "gu-IN", isGlobal = false),
-            Language("ta", "ta", "Tamil", "தமிழ்", "🇮🇳", LayoutType.TAMIL, false, "ta-IN", isGlobal = false),
-            Language("te", "te", "Telugu", "తెలుగు", "🇮🇳", LayoutType.TELUGU, false, "te-IN", isGlobal = false),
-            Language("kn", "kn", "Kannada", "ಕನ್ನಡ", "🇮🇳", LayoutType.KANNADA, false, "kn-IN", isGlobal = false),
-            Language("ml", "ml", "Malayalam", "മലയാളം", "🇮🇳", LayoutType.MALAYALAM, false, "ml-IN", isGlobal = false),
-            Language("pa", "pa", "Punjabi", "ਪੰਜਾਬੀ", "🇮🇳", LayoutType.GURMUKHI, false, "pa-IN", isGlobal = false),
-            Language("ur", "ur", "Urdu", "اردو", "🇵🇰", LayoutType.ARABIC, false, "ur-PK", isGlobal = false),
-            Language("sa", "sa", "Sanskrit", "संस्कृतम्", "🇮🇳", LayoutType.DEVANAGARI, false, "hi-IN", isGlobal = false),
-            Language("ne", "ne", "Nepali", "नेपाली", "🇳🇵", LayoutType.DEVANAGARI, false, "ne-NP", isGlobal = false),
-            Language("or", "or", "Odia", "ଓଡ଼ିଆ", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false),
-            Language("as", "as", "Assamese", "অসমীয়া", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false),
 
-            // --- Foreign & World Languages ---
+            // --- Global & World Languages ---
             Language("es", "es", "Spanish", "Español", "🇪🇸", LayoutType.QWERTY, false, "es-ES", isGlobal = true),
             Language("fr", "fr", "French", "Français", "🇫🇷", LayoutType.QWERTY, false, "fr-FR", isGlobal = true),
             Language("de", "de", "German", "Deutsch", "🇩🇪", LayoutType.QWERTY, false, "de-DE", isGlobal = true),
@@ -68,7 +57,20 @@ data class Language(
             Language("pl", "pl", "Polish", "Polski", "🇵🇱", LayoutType.QWERTY, false, "pl-PL", isGlobal = true),
             Language("th", "th", "Thai", "ไทย", "🇹🇭", LayoutType.QWERTY, false, "th-TH", isGlobal = true),
             Language("fa", "fa", "Persian", "فارسی", "🇮🇷", LayoutType.ARABIC, false, "fa-IR", isGlobal = true),
-            Language("fil", "fil", "Filipino", "Tagalog", "🇵🇭", LayoutType.QWERTY, false, "fil-PH", isGlobal = true)
+            Language("fil", "fil", "Filipino", "Tagalog", "🇵🇭", LayoutType.QWERTY, false, "fil-PH", isGlobal = true),
+
+            // --- Regional Indian Languages (Positioned at bottom for clean global balance) ---
+            Language("gu", "gu", "Gujarati", "ગુજરાતી", "🇮🇳", LayoutType.GUJARATI, false, "gu-IN", isGlobal = false),
+            Language("ta", "ta", "Tamil", "தமிழ்", "🇮🇳", LayoutType.TAMIL, false, "ta-IN", isGlobal = false),
+            Language("te", "te", "Telugu", "తెలుగు", "🇮🇳", LayoutType.TELUGU, false, "te-IN", isGlobal = false),
+            Language("kn", "kn", "Kannada", "ಕನ್ನಡ", "🇮🇳", LayoutType.KANNADA, false, "kn-IN", isGlobal = false),
+            Language("ml", "ml", "Malayalam", "മലയാളം", "🇮🇳", LayoutType.MALAYALAM, false, "ml-IN", isGlobal = false),
+            Language("pa", "pa", "Punjabi", "ਪੰਜਾਬੀ", "🇮🇳", LayoutType.GURMUKHI, false, "pa-IN", isGlobal = false),
+            Language("ur", "ur", "Urdu", "اردو", "🇵🇰", LayoutType.ARABIC, false, "ur-PK", isGlobal = false),
+            Language("sa", "sa", "Sanskrit", "संस्कृतम्", "🇮🇳", LayoutType.DEVANAGARI, false, "hi-IN", isGlobal = false),
+            Language("ne", "ne", "Nepali", "नेपाली", "🇳🇵", LayoutType.DEVANAGARI, false, "ne-NP", isGlobal = false),
+            Language("or", "or", "Odia", "ଓଡ଼ିଆ", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false),
+            Language("as", "as", "Assamese", "অসমীয়া", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false)
         )
 
         fun getById(id: String): Language {

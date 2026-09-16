@@ -230,6 +230,17 @@ class CreditsSecurityManager private constructor(context: Context) {
     }
 
     /**
+     * Set credits directly for testing and developer preview.
+     */
+    @Synchronized
+    fun setCreditsForTesting(credits: Int) {
+        val today = getTodayDateKey()
+        val dailySpinsUsed = prefs.getInt(KEY_DAILY_SPINS_USED, 0)
+        val bonusSpins = prefs.getInt(KEY_BONUS_SPINS, 0)
+        saveVaultInternal(credits.coerceAtLeast(0), dailySpinsUsed, bonusSpins, today)
+    }
+
+    /**
      * Check if user has sufficient credits for an AI operation.
      * Pro/VIP users have unlimited credits.
      */
@@ -271,11 +282,11 @@ class CreditsSecurityManager private constructor(context: Context) {
 
     companion object {
         const val DAILY_FREE_SPINS = 5
-        const val DEFAULT_STARTER_CREDITS = 100
-        const val COST_PER_AI_GENERATION = 10
-        const val REWARDED_AD_CREDITS = 100
-        const val REWARDED_AD_BONUS_SPINS = 3
-        const val MINIMUM_WATCH_SECONDS = 5
+        const val DEFAULT_STARTER_CREDITS = 20
+        const val COST_PER_AI_GENERATION = 1
+        const val REWARDED_AD_CREDITS = 5
+        const val REWARDED_AD_BONUS_SPINS = 2
+        const val MINIMUM_WATCH_SECONDS = 3
 
         private const val KEY_CREDITS = "sec_vault_ai_credits"
         private const val KEY_SIGNATURE = "sec_vault_signature"

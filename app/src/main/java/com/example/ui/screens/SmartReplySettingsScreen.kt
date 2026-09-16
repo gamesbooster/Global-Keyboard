@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -38,6 +40,7 @@ fun SmartReplySettingsScreen(
     onNavigateToSpinAndWin: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val isDarkMode by preferences.isDarkMode.collectAsState()
     val isPremiumUser by preferences.isPremiumUser.collectAsState()
@@ -222,14 +225,14 @@ fun SmartReplySettingsScreen(
                         )
                     } else {
                         val used = smartReplyUsageCount
-                        val remaining = (10 - used).coerceAtLeast(0)
+                        val remaining = (20 - used).coerceAtLeast(0)
                         Text(
-                            "$used / 10 free generations used today ($remaining remaining).",
+                            "$used / 20 free generations used today ($remaining remaining). Each Smart Reply costs 1 credit.",
                             color = textMuted,
                             fontSize = 12.sp
                         )
                         LinearProgressIndicator(
-                            progress = { (used.toFloat() / 10f).coerceIn(0f, 1f) },
+                            progress = { (used.toFloat() / 20f).coerceIn(0f, 1f) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(6.dp)
@@ -275,7 +278,97 @@ fun SmartReplySettingsScreen(
                 }
             }
 
-            // Default Style Configuration (Full Reply Style & Tone Library)
+            // Quick Testing Controls (Free 20 Quota vs VIP Unlimited)
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = cardColor,
+                border = BorderStroke(1.dp, borderColor),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🧪 Testing Mode (Quota & VIP)", color = textColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isPremiumUser) Color(0xFF8B5CF6).copy(alpha = 0.2f) else Color(0xFF10B981).copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                if (isPremiumUser) "👑 VIP Unlimited" else "👤 Free (20 Quota)",
+                                color = if (isPremiumUser) Color(0xFFA78BFA) else Color(0xFF10B981),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        "Test switching between Free tier (20 free replies limit, 1 credit per reply) and Premium tier (unlimited replies):",
+                        fontSize = 11.5.sp,
+                        color = textMuted
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                preferences.setPremiumUser(!isPremiumUser)
+                                Toast.makeText(
+                                    context,
+                                    if (!isPremiumUser) "👑 Switched to VIP Pro (Unlimited)!" else "👤 Switched to Free User (20 Free Quota)",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isPremiumUser) Color(0xFF10B981) else Color(0xFF8B5CF6)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(34.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                if (isPremiumUser) "Switch to Free" else "Switch to VIP Pro",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                preferences.setCreditsForTesting(0)
+                                Toast.makeText(context, "🪙 Set 0 Credits (Test Quota Limit Over)", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(0.9f).height(34.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text("Set 0 Credits", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Button(
+                            onClick = {
+                                preferences.setCreditsForTesting(20)
+                                preferences.resetSmartReplyUsageForTesting()
+                                Toast.makeText(context, "🔄 Reset to 20 Free Credits & 0 Used!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.1f).height(34.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        ) {
+                            Text("Reset 20 Free", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+            }
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = cardColor,

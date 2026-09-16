@@ -99,7 +99,15 @@ fun LingoKeyApp(preferences: LingoKeyPreferences, targetDestination: String? = n
                 onRestartOnboarding = { navController.navigate("onboarding") },
                 onNavigateToSmartReply = { navController.navigate("smart_reply_settings") },
                 onNavigateToSpinAndWin = { navController.navigate("spin_and_win") },
-                onNavigateToStore = { navController.navigate("store") }
+                onNavigateToStore = { navController.navigate("store") },
+                onNavigateToTranslate = { navController.navigate("translate") }
+            )
+        }
+
+        composable("translate") {
+            TranslateScreen(
+                preferences = preferences,
+                onBack = { navController.popBackStack() }
             )
         }
 

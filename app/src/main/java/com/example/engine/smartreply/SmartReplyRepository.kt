@@ -69,7 +69,7 @@ class SmartReplyRepository(
 
         // 2. Check usage limit / free quota
         if (!usageRepository.canGenerate()) {
-            return SmartReplyUiState.RateLimited("Daily free Smart Reply quota reached. Upgrade to VIP for unlimited replies.")
+            return SmartReplyUiState.RateLimited("Free Smart Reply limit reached (0 left). Watch a short ad or spin to get more free replies!")
         }
 
         val effectiveStyle = if (style != SmartReplyLibrary.SMART_MATCH) {
@@ -100,20 +100,23 @@ class SmartReplyRepository(
                 }
             },
             onFailure = { error ->
-                when (error) {
-                    is IOException -> SmartReplyUiState.NetworkError("No internet connection. Please check your network.")
-                    else -> {
-                        val msg = error.message ?: ""
-                        if (msg.contains("Rate limit", ignoreCase = true)) {
-                            SmartReplyUiState.RateLimited("Rate limit reached. Please try again in a moment.")
-                        } else if (msg.contains("authentication", ignoreCase = true) || msg.contains("401") || msg.contains("403")) {
-                            SmartReplyUiState.AuthenticationError("AI authentication error. Please check credentials.")
-                        } else if (msg.contains("timeout", ignoreCase = true)) {
-                            SmartReplyUiState.Timeout("Request timed out. Please try again.")
-                        } else {
-                            SmartReplyUiState.ProviderError(msg.ifBlank { "Smart Reply is temporarily unavailable." })
+                // Always try offline provider so user never gets blocked by external API outages
+                val offlineProvider = OfflineSmartReplyProvider()
+                kotlinx.coroutines.runBlocking {
+                    val fallbackResult = offlineProvider.analyzeAndGenerateReplies(request)
+                    fallbackResult.fold(
+                        onSuccess = { offlineResponse ->
+                            if (offlineResponse.replies.isNotEmpty()) {
+                                usageRepository.recordSuccessfulGeneration()
+                                SmartReplyUiState.Success(offlineResponse)
+                            } else {
+                                SmartReplyUiState.EmptyResult("No reply suggestions could be generated for this message.")
+                            }
+                        },
+                        onFailure = {
+                            SmartReplyUiState.ProviderError(error.message ?: "Smart Reply is temporarily unavailable.")
                         }
-                    }
+                    )
                 }
             }
         )

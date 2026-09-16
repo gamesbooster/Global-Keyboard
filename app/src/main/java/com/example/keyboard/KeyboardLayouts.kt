@@ -5,6 +5,8 @@ import com.example.model.LayoutType
 object KeyboardLayouts {
 
     val NUMBER_ROW = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
+    val NUMBERS_TOP_ROW = listOf("[", "]", "{", "}", "<", ">", "^", "%", "°", "=")
+    val SYMBOLS_TOP_ROW = listOf("€", "¥", "£", "¢", "©", "®", "™", "✓", "•", "∆")
 
     val QWERTY_ROWS = listOf(
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),

@@ -19,7 +19,7 @@ class DefaultSmartReplyUsageRepository(
 ) : SmartReplyUsageRepository {
 
     companion object {
-        const val FREE_DAILY_QUOTA = 10
+        const val FREE_DAILY_QUOTA = 20
     }
 
     override fun getUsageCount(): Int {
@@ -32,16 +32,16 @@ class DefaultSmartReplyUsageRepository(
 
     override fun canGenerate(): Boolean {
         if (isPremium()) return true
-        return preferences.hasRemainingAiCredits()
+        return preferences.hasRemainingAiCredits(1)
     }
 
     override fun recordSuccessfulGeneration(): Boolean {
-        preferences.deductCreditsForSmartReply()
+        preferences.deductCreditsForSmartReply(1)
         return preferences.recordSmartReplyUsage()
     }
 
     override fun getRemainingGenerations(): Int {
         if (isPremium()) return Int.MAX_VALUE
-        return preferences.aiCredits.value / 10
+        return preferences.aiCredits.value
     }
 }

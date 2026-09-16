@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +55,17 @@ fun VoiceSettingsScreen(
 
     var testSpeechText by remember { mutableStateOf("नमस्ते! ग्लोबल कीबोर्ड डायनामिक में आपका स्वागत है।") }
 
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted
+    }
+
     val bgColor = if (isDarkMode) Color(0xFF0F1016) else Color(0xFFF8FAFC)
     val cardBg = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)
     val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
@@ -80,6 +96,35 @@ fun VoiceSettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // MICROPHONE PERMISSION BANNER (If not yet granted)
+            if (!hasAudioPermission) {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B).copy(alpha = 0.25f)),
+                    border = BorderStroke(1.dp, Color(0xFF10B981)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(24.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Microphone Permission", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = textColor)
+                            Text("Required for voice typing speech recognition", fontSize = 11.sp, color = textMuted)
+                        }
+                        Button(
+                            onClick = { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Allow", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             // 1. VOICE GENDER PERSONA (Namaste, Soft Gentle, Female, Male)
             Row(
                 modifier = Modifier.fillMaxWidth(),

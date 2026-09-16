@@ -1,18 +1,25 @@
 package com.example.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -254,6 +261,344 @@ fun NeumorphicFeatureCard(
                 tint = textMuted.copy(alpha = 0.5f),
                 modifier = Modifier.size(12.dp)
             )
+        }
+    }
+}
+
+/**
+ * 3D Neumorphic Compact Top Header.
+ * Solves the high vertical height issue by providing a slim, compact 3D card
+ * with proper statusBarsPadding() so the device status bar (time, battery %, notifications, wifi/LTE)
+ * is fully and crisply visible above the card with comfortable margin.
+ */
+@Composable
+fun NeumorphicTopHeader(
+    activeLanguageName: String,
+    isPremiumUser: Boolean,
+    isDarkMode: Boolean,
+    onToggleDarkMode: () -> Unit,
+    onOpenVip: () -> Unit,
+    onOpenHelp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+
+    val wellBrush = if (isDarkMode) {
+        Brush.linearGradient(
+            colors = listOf(NeumorphicColors.DarkWellTop, NeumorphicColors.DarkWellBottom),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+        )
+    } else {
+        Brush.linearGradient(
+            colors = listOf(NeumorphicColors.LightWellTop, NeumorphicColors.LightWellBottom),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+        )
+    }
+
+    val wellBorder = if (isDarkMode) {
+        BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                listOf(Color.Black.copy(alpha = 0.6f), Color.White.copy(alpha = 0.10f))
+            )
+        )
+    } else {
+        BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                listOf(Color(0x2A000000), Color.White.copy(alpha = 0.85f))
+            )
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+    ) {
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
+            isDarkMode = isDarkMode,
+            cornerRadius = 16.dp,
+            elevation = 5.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Left: 3D Logo & App Branding (Compact)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 3D Embossed Logo
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF059669), Color(0xFF10B981), Color(0xFF34D399))
+                                )
+                            )
+                            .border(
+                                1.dp,
+                                Brush.linearGradient(
+                                    listOf(Color.White.copy(alpha = 0.6f), Color.Transparent)
+                                ),
+                                RoundedCornerShape(9.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "म",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            "Global Keyboard Dynamic",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = textColor,
+                            maxLines = 1
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10B981))
+                            )
+                            Text(
+                                "$activeLanguageName • Active",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF10B981),
+                                maxLines = 1
+                            )
+                            if (isPremiumUser) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFF59E0B).copy(alpha = 0.2f)
+                                ) {
+                                    Text(
+                                        "VIP",
+                                        color = Color(0xFFF59E0B),
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.5.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Right: 3D Compact Action Buttons (Dark/Light, VIP, Help)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Theme Switcher Button
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(wellBrush)
+                            .border(wellBorder, RoundedCornerShape(8.dp))
+                            .clickable { onToggleDarkMode() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = "Toggle Theme",
+                            tint = if (isDarkMode) Color(0xFFFBBF24) else Color(0xFF059669),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // VIP / Crown Button
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(wellBrush)
+                            .border(wellBorder, RoundedCornerShape(8.dp))
+                            .clickable { onOpenVip() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WorkspacePremium,
+                            contentDescription = "VIP Pro Features",
+                            tint = if (isPremiumUser) Color(0xFFF59E0B) else Color(0xFF10B981),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    // Help / Tutorial Button
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(wellBrush)
+                            .border(wellBorder, RoundedCornerShape(8.dp))
+                            .clickable { onOpenHelp() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                            contentDescription = "Help & Tutorial",
+                            tint = textMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 3D Neumorphic Bottom Navigation Bar.
+ * Built with full 3D physical depth, extruded container, and recessed/elevated tabs:
+ * Tab 0: Home (Replaces Layout)
+ * Tab 1: VIP Pro (Prominently displays Pro features and subscription pricing)
+ * Tab 2: Settings
+ */
+@Composable
+fun NeumorphicBottomBar(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit,
+    isDarkMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val items = listOf(
+        Triple(0, "Home", Icons.Default.Home),
+        Triple(1, "VIP Pro", Icons.Default.WorkspacePremium),
+        Triple(2, "Settings", Icons.Default.Settings)
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    ) {
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
+            isDarkMode = isDarkMode,
+            cornerRadius = 20.dp,
+            elevation = 7.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items.forEach { (index, label, icon) ->
+                    val isSelected = selectedTab == index
+
+                    val wellBrush = if (isDarkMode) {
+                        Brush.linearGradient(
+                            listOf(NeumorphicColors.DarkWellTop, NeumorphicColors.DarkWellBottom)
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            listOf(NeumorphicColors.LightWellTop, NeumorphicColors.LightWellBottom)
+                        )
+                    }
+
+                    val wellBorder = if (isDarkMode) {
+                        BorderStroke(
+                            1.dp,
+                            if (isSelected) {
+                                if (index == 1) Color(0xFFF59E0B) else Color(0xFF10B981)
+                            } else {
+                                Color.White.copy(alpha = 0.08f)
+                            }
+                        )
+                    } else {
+                        BorderStroke(
+                            1.dp,
+                            if (isSelected) {
+                                if (index == 1) Color(0xFFF59E0B) else Color(0xFF10B981)
+                            } else {
+                                Color(0x20000000)
+                            }
+                        )
+                    }
+
+                    val tabColor = when {
+                        isSelected && index == 1 -> Color(0xFFF59E0B)
+                        isSelected -> Color(0xFF10B981)
+                        isDarkMode -> NeumorphicColors.DarkTextMuted
+                        else -> NeumorphicColors.LightTextMuted
+                    }
+
+                    val scale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.04f else 1.0f,
+                        label = "tab_scale"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .scale(scale)
+                            .clip(RoundedCornerShape(14.dp))
+                            .then(
+                                if (isSelected) {
+                                    Modifier
+                                        .background(wellBrush)
+                                        .border(wellBorder, RoundedCornerShape(14.dp))
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                onTabSelected(index)
+                            }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = label,
+                                tint = tabColor,
+                                modifier = Modifier.size(if (isSelected) 21.dp else 19.dp)
+                            )
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = tabColor
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

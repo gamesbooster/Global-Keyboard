@@ -27,7 +27,7 @@ class GeminiSmartReplyProvider(
 ) : SmartReplyProvider {
 
     private val TAG = "GeminiSmartReply"
-    private val CANDIDATE_MODELS = listOf("gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash")
+    private val CANDIDATE_MODELS = listOf("gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-3.6-flash", "gemini-flash-latest")
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -41,7 +41,7 @@ class GeminiSmartReplyProvider(
         } catch (e: Exception) {
             null
         }
-        return if (!key.isNullOrBlank() && key != "MY_GEMINI_API_KEY") key else null
+        return if (!key.isNullOrBlank() && key != "MY_GEMINI_API_KEY" && key != "your_api_key_here") key else null
     }
 
     override suspend fun analyzeAndGenerateReplies(request: SmartReplyRequest): Result<SmartReplyResponse> = withContext(Dispatchers.IO) {
@@ -169,12 +169,8 @@ class GeminiSmartReplyProvider(
                     val responseString = response.body?.string() ?: ""
                     if (!response.isSuccessful) {
                         Log.w(TAG, "Gemini ($modelName) API error code: ${response.code}, body: $responseString")
-                        if (response.code == 429) {
-                            return@withContext Result.failure(RuntimeException("Rate limit reached. Please wait a moment and try again."))
-                        } else if (response.code == 401 || response.code == 403) {
-                            return@withContext Result.failure(RuntimeException("API authentication error. Please check your credentials."))
-                        }
-                        // Try next model if 404 or 5xx
+                        // If 429 (rate limit) or server error, record and try next model or fallback to offline
+                        lastException = RuntimeException("Gemini HTTP ${response.code}")
                         return@use
                     }
 

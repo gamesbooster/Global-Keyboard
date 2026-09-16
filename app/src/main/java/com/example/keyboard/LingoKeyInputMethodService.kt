@@ -1,5 +1,8 @@
 package com.example.keyboard
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.text.InputType
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.os.Bundle
@@ -64,6 +67,11 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         }
     }
 
+    private var clipboardManager: ClipboardManager? = null
+    private val clipChangedListener = ClipboardManager.OnPrimaryClipChangedListener {
+        syncLatestSystemClip()
+    }
+
     override fun onCreate() {
         super.onCreate()
         try {
@@ -80,6 +88,14 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         clipboardRepository = ClipboardRepository.getInstance(this)
         aiProvider = GeminiAIProvider()
         voiceTTSEngine = VoiceTTSEngine.getInstance(this)
+
+        try {
+            clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboardManager?.addPrimaryClipChangedListener(clipChangedListener)
+            syncLatestSystemClip()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     /**
@@ -188,6 +204,7 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         if (!lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         }
+        syncLatestSystemClip()
     }
 
     override fun onWindowShown() {
@@ -200,6 +217,7 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         if (!lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         }
+        syncLatestSystemClip()
     }
 
     override fun onWindowHidden() {
@@ -216,12 +234,47 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            clipChangedListener.let { clipboardManager?.removePrimaryClipChangedListener(it) }
+        } catch (e: Exception) {
+            // Ignore
+        }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         store.clear()
         stopSpeechRecognition()
         inputComposeView = null
+    }
+
+    /**
+     * Reads system clipboard safely when keyboard is active (IME has legitimate permission).
+     * Google Play compliant: data remains strictly local in SharedPreferences, never sent over network.
+     * Skips password fields for user privacy.
+     */
+    private fun syncLatestSystemClip() {
+        try {
+            val cm = clipboardManager ?: (getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)?.also { clipboardManager = it }
+            val clip = cm?.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val item = clip.getItemAt(0)
+                val text = item.text?.toString() ?: item.coerceToText(this)?.toString()
+                if (!text.isNullOrBlank() && text.length <= 4000) {
+                    val isPasswordField = currentInputEditorInfo?.let {
+                        val variation = it.inputType and InputType.TYPE_MASK_VARIATION
+                        variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                        variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                        variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+                    } ?: false
+
+                    if (!isPasswordField) {
+                        clipboardRepository.addSystemClip(text)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun commitTextSafe(text: String) {
@@ -409,7 +462,10 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
 
                     val message = when (error) {
                         SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                            openSettingsActivity("voice_settings")
+                            "Microphone permission required (opening settings)"
+                        }
                         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network issue for voice"
                         SpeechRecognizer.ERROR_SERVER -> "Voice server error"
                         else -> "Voice recognition stopped (Code: $error)"

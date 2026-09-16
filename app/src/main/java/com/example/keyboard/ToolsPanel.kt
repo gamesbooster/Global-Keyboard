@@ -50,6 +50,7 @@ fun ToolsPanel(
     onOpenThemes: () -> Unit,
     onOpenLanguages: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenCustomizeToolbar: () -> Unit = {},
     onClose: () -> Unit,
     panelHeight: Dp = 268.dp
 ) {
@@ -62,6 +63,14 @@ fun ToolsPanel(
             accentColor = Color(0xFF6366F1),
             isFeatured = true,
             onClick = onOpenSmartReply
+        ),
+        ToolItem(
+            id = "customize_toolbar",
+            title = "✏️ Reorder Toolbar",
+            subtitle = "Reorder & customize top toolbar tools",
+            icon = Icons.Default.Tune,
+            accentColor = Color(0xFFEC4899),
+            onClick = onOpenCustomizeToolbar
         ),
         ToolItem(
             id = "translate",

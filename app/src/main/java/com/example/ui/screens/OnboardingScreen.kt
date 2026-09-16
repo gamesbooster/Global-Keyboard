@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -95,6 +100,12 @@ fun OnboardingScreen(
     }
 
     val voiceGuidanceEnabled by preferences.voiceGuidanceEnabled.collectAsState()
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        currentStep = OnboardingStep.LANGUAGE_SETUP
+    }
 
     // Function to play or stop voice guidance for the current step
     fun toggleVoiceGuidance(text: String) {
@@ -204,7 +215,17 @@ fun OnboardingScreen(
                             onToggleAudio = {
                                 toggleVoiceGuidance(AudioGuidanceHelper.getPermissionsAudioText(activeLanguage))
                             },
-                            onNext = { currentStep = OnboardingStep.LANGUAGE_SETUP },
+                            onNext = {
+                                val hasAudioPerm = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasAudioPerm) {
+                                    currentStep = OnboardingStep.LANGUAGE_SETUP
+                                } else {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
                             onBack = { currentStep = OnboardingStep.WELCOME }
                         )
                     }

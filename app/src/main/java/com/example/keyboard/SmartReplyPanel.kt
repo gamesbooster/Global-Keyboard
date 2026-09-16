@@ -3,6 +3,7 @@ package com.example.keyboard
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.MainActivity
 import com.example.data.LingoKeyPreferences
 import com.example.engine.smartreply.SmartReplyRepository
 import com.example.model.*
@@ -56,6 +58,9 @@ fun SmartReplyPanel(
     val coroutineScope = rememberCoroutineScope()
     val preferences = remember { LingoKeyPreferences.getInstance(context) }
     val maxSuggestions by preferences.smartReplyMaxSuggestions.collectAsState()
+    val aiCredits by preferences.aiCredits.collectAsState()
+    val isPremiumUser by preferences.isPremiumUser.collectAsState()
+    val smartReplyUsageCount by preferences.smartReplyUsageCount.collectAsState()
 
     var inputMessage by remember { mutableStateOf("") }
     var selectedStyle by remember { mutableStateOf(SmartReplyLibrary.SMART_MATCH) }
@@ -67,6 +72,11 @@ fun SmartReplyPanel(
     var showMoreStylesModal by remember { mutableStateOf(false) }
     var styleSearchQuery by remember { mutableStateOf("") }
     var modalFilterCategory by remember { mutableStateOf<SmartReplyStyleCategory?>(null) }
+
+    // Testing & Quota modal state
+    var showTestingModal by remember { mutableStateOf(false) }
+    var isWatchingAd by remember { mutableStateOf(false) }
+    var adCountdown by remember { mutableStateOf(3) }
 
     // Editing before insert state
     var editingReplyIndex by remember { mutableStateOf<Int?>(null) }
@@ -121,6 +131,41 @@ fun SmartReplyPanel(
                 isInputConnectionActive = isInputConnectionActive
             )
             uiState = resultState
+        }
+    }
+
+    fun startWatchingAd() {
+        coroutineScope.launch {
+            isWatchingAd = true
+            adCountdown = 3
+            while (adCountdown > 0) {
+                delay(1000)
+                adCountdown--
+            }
+            preferences.recordRewardedAdClaim(
+                rewardCredits = 5,
+                bonusSpins = 1,
+                elapsedWatchSeconds = 3
+            )
+            Toast.makeText(context, "🎉 +5 Free Smart Replies Added! (Balance: ${preferences.aiCredits.value})", Toast.LENGTH_SHORT).show()
+            isWatchingAd = false
+            if (inputMessage.isNotBlank()) {
+                analyzeMessage()
+            } else {
+                uiState = SmartReplyUiState.Idle
+            }
+        }
+    }
+
+    fun launchSpinAndWin() {
+        try {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("destination", "spin_and_win")
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Opening Spin & Win...", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -204,6 +249,33 @@ fun SmartReplyPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    // Live Quota / VIP Status Badge
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isPremiumUser) Color(0xFF8B5CF6).copy(alpha = 0.2f) else if (aiCredits > 0) Color(0xFF10B981).copy(alpha = 0.18f) else Color(0xFFEF4444).copy(alpha = 0.18f),
+                        border = BorderStroke(0.6.dp, if (isPremiumUser) Color(0xFF8B5CF6) else if (aiCredits > 0) Color(0xFF10B981) else Color(0xFFEF4444)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { showTestingModal = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            if (isPremiumUser) {
+                                Text("👑 VIP", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFA78BFA))
+                            } else {
+                                Text(
+                                    text = if (aiCredits > 0) "🪙 $aiCredits Left" else "🪙 0 Left",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (aiCredits > 0) Color(0xFF10B981) else Color(0xFFEF4444)
+                                )
+                            }
+                        }
+                    }
+
                     IconButton(
                         onClick = { showPrivacyDialog = true },
                         modifier = Modifier.size(28.dp)
@@ -553,10 +625,19 @@ fun SmartReplyPanel(
 
                 // Action Button: Analyze / Regenerate
                 item {
+                    val isQuotaOver = !isPremiumUser && aiCredits <= 0
                     Button(
-                        onClick = { analyzeMessage() },
-                        enabled = inputMessage.isNotBlank() && uiState !is SmartReplyUiState.Analyzing,
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryColor),
+                        onClick = {
+                            if (isQuotaOver) {
+                                startWatchingAd()
+                            } else {
+                                analyzeMessage()
+                            }
+                        },
+                        enabled = (isQuotaOver || inputMessage.isNotBlank()) && uiState !is SmartReplyUiState.Analyzing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isQuotaOver) Color(0xFFEF4444) else theme.primaryColor
+                        ),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -568,19 +649,21 @@ fun SmartReplyPanel(
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
-                                if (uiState is SmartReplyUiState.Success) Icons.Default.Refresh else Icons.Default.AutoAwesome,
+                                if (isQuotaOver) Icons.Default.PlayArrow else if (uiState is SmartReplyUiState.Success) Icons.Default.Refresh else Icons.Default.AutoAwesome,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = if (uiState is SmartReplyUiState.Success) {
-                                    "Regenerate (${selectedStyle.emoji} ${selectedStyle.displayName})"
+                                text = if (isQuotaOver) {
+                                    "Quota Over (0 Left) • Watch Ad for +5 Free Replies"
+                                } else if (uiState is SmartReplyUiState.Success) {
+                                    "Regenerate (-1 Reply) • ${selectedStyle.emoji} ${selectedStyle.displayName}"
                                 } else {
-                                    "Generate Replies • ${selectedStyle.emoji} ${selectedStyle.displayName}"
+                                    "Generate Replies (-1 Reply) • ${selectedStyle.emoji} ${selectedStyle.displayName}"
                                 },
                                 color = Color.White,
-                                fontSize = 11.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -818,7 +901,16 @@ fun SmartReplyPanel(
 
                     is SmartReplyUiState.RateLimited -> {
                         item {
-                            ErrorCard(theme, "Quota Limit", state.message) { analyzeMessage() }
+                            QuotaLimitCard(
+                                theme = theme,
+                                message = state.message,
+                                onWatchAd = { startWatchingAd() },
+                                onOpenSpin = { launchSpinAndWin() },
+                                onSwitchToVip = {
+                                    preferences.setPremiumUser(!isPremiumUser)
+                                    if (inputMessage.isNotBlank()) analyzeMessage()
+                                }
+                            )
                         }
                     }
 
@@ -1094,6 +1186,233 @@ fun SmartReplyPanel(
             }
         }
 
+        // In-Keyboard Rewarded Ad Simulation Overlay
+        AnimatedVisibility(
+            visible = isWatchingAd,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color.Black.copy(alpha = 0.92f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.PlayCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Sponsored Video Reward",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Adding +5 Free Smart Replies in ${adCountdown}s...",
+                        color = Color(0xFF10B981),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(
+                        progress = { ((3 - adCountdown) / 3f).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Color(0xFF10B981),
+                        trackColor = Color.DarkGray
+                    )
+                }
+            }
+        }
+
+        // In-Keyboard Testing & Quota Control Modal
+        AnimatedVisibility(
+            visible = showTestingModal,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = theme.backgroundColor
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("🧪", fontSize = 14.sp)
+                            Text(
+                                "Smart Reply Quota & Testing",
+                                color = theme.textColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(
+                            onClick = { showTestingModal = false },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = theme.textSecondaryColor, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Quota Info Box
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = theme.keyColor,
+                        border = BorderStroke(0.5.dp, theme.keyBorderColor),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Active Tier:", color = theme.textSecondaryColor, fontSize = 10.sp)
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = if (isPremiumUser) Color(0xFF8B5CF6).copy(alpha = 0.2f) else Color(0xFF10B981).copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = if (isPremiumUser) "👑 VIP Pro (Unlimited)" else "👤 Free Tier (20 Free Replies)",
+                                        color = if (isPremiumUser) Color(0xFFA78BFA) else Color(0xFF10B981),
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Remaining Balance:", color = theme.textSecondaryColor, fontSize = 10.sp)
+                                Text(
+                                    text = if (isPremiumUser) "Unlimited 👑" else "$aiCredits Credits ($aiCredits Replies Left)",
+                                    color = if (aiCredits > 0 || isPremiumUser) theme.textColor else Color(0xFFEF4444),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Testing Action Buttons
+                    Text("Instant Testing Controls:", color = theme.textSecondaryColor, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                preferences.setPremiumUser(!isPremiumUser)
+                                Toast.makeText(context, if (!isPremiumUser) "👑 Switched to VIP Pro (Unlimited)" else "👤 Switched to Free User (20 Quota)", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isPremiumUser) Color(0xFF10B981) else Color(0xFF8B5CF6)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text(if (isPremiumUser) "Switch to Free" else "Switch to VIP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Button(
+                            onClick = {
+                                preferences.setCreditsForTesting(0)
+                                Toast.makeText(context, "🪙 Set 0 Credits (Test Quota Over)", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text("Set 0 Credits", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Button(
+                            onClick = {
+                                preferences.setCreditsForTesting(20)
+                                preferences.resetSmartReplyUsageForTesting()
+                                Toast.makeText(context, "🔄 Reset to 20 Free Credits!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text("Reset 20 Credits", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                showTestingModal = false
+                                startWatchingAd()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(2.dp))
+                            Text("Watch Ad (+5)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Button(
+                            onClick = {
+                                val won = listOf(5, 10, 15, 20).random()
+                                preferences.recordSpinResult(won)
+                                Toast.makeText(context, "🎉 Won +$won Free Smart Replies!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text("🎡 Quick Spin (+Win)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+
         // Privacy dialog
         if (showPrivacyDialog) {
             AlertDialog(
@@ -1169,6 +1488,91 @@ private fun ErrorCard(
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
             ) {
                 Text("Retry", fontSize = 10.5.sp, color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuotaLimitCard(
+    theme: KeyboardTheme,
+    message: String,
+    onWatchAd: () -> Unit,
+    onOpenSpin: () -> Unit,
+    onSwitchToVip: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFFEF4444).copy(alpha = 0.12f),
+        border = BorderStroke(0.8.dp, Color(0xFFEF4444).copy(alpha = 0.45f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    Icons.Default.HourglassEmpty,
+                    contentDescription = null,
+                    tint = Color(0xFFEF4444),
+                    modifier = Modifier.size(16.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Free Smart Reply Limit Reached (0/20 Left)",
+                        color = Color(0xFFEF4444),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Watch a short ad or spin to get +5 free replies instantly!",
+                        color = theme.textColor,
+                        fontSize = 9.5.sp
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Button(
+                    onClick = onWatchAd,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.weight(1.2f).height(30.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text("Watch Ad (+5)", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                Button(
+                    onClick = onOpenSpin,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.weight(1.1f).height(30.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Text("🎡 Spin & Win", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+
+                Button(
+                    onClick = onSwitchToVip,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.weight(0.9f).height(30.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Text("👑 VIP", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
             }
         }
     }

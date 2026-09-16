@@ -23,7 +23,7 @@ class LingoKeyPreferences(context: Context) {
     val autoCorrection = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CORRECT, true))
     val showSuggestions = MutableStateFlow(prefs.getBoolean(KEY_SUGGESTIONS, true))
     val showNumberRow = MutableStateFlow(prefs.getBoolean(KEY_NUMBER_ROW, true))
-    val transliterationEnabled = MutableStateFlow(prefs.getBoolean(KEY_TRANSLITERATION, true))
+    val transliterationEnabled = MutableStateFlow(prefs.getBoolean(KEY_TRANSLITERATION, false))
     val emojiSuggestionsEnabled = MutableStateFlow(prefs.getBoolean(KEY_EMOJI_SUGGESTIONS, true))
     val keyVibration = MutableStateFlow(prefs.getBoolean(KEY_VIBRATION, true))
     val keySound = MutableStateFlow(prefs.getBoolean(KEY_SOUND, false))
@@ -73,6 +73,12 @@ class LingoKeyPreferences(context: Context) {
     // Premium / VIP In-App Purchase Status
     val isPremiumUser = MutableStateFlow(prefs.getBoolean(KEY_IS_PREMIUM_USER, false))
     val aiUsageCount = MutableStateFlow(prefs.getInt(KEY_AI_USAGE_COUNT, 0))
+
+    // Reorderable Toolbar Items
+    val toolbarItems = MutableStateFlow(loadToolbarItems())
+
+    // Custom Message Templates
+    val customTemplates = MutableStateFlow(loadCustomTemplates())
 
     // Smart Reply Preferences
     val smartReplyEnabled = MutableStateFlow(prefs.getBoolean(KEY_SMART_REPLY_ENABLED, true))
@@ -250,6 +256,176 @@ class LingoKeyPreferences(context: Context) {
     fun setAutoDetectLanguage(value: Boolean) {
         autoDetectLanguage.value = value
         prefs.edit().putBoolean(KEY_AUTO_DETECT_LANG, value).apply()
+    }
+
+    private fun loadToolbarItems(): List<String> {
+        val raw = prefs.getString("pref_toolbar_order", null)
+        if (!raw.isNullOrBlank()) {
+            val list = raw.split(",").filter { it.isNotBlank() }
+            if (list.isNotEmpty()) return list
+        }
+        return listOf("translate", "smart_reply", "ai", "tools", "voice", "stickers", "settings")
+    }
+
+    fun setToolbarItems(items: List<String>) {
+        val filtered = items.distinct()
+        toolbarItems.value = filtered
+        prefs.edit().putString("pref_toolbar_order", filtered.joinToString(",")).apply()
+    }
+
+    fun resetToolbarItems() {
+        val defaultList = listOf("translate", "smart_reply", "ai", "tools", "voice", "stickers", "settings")
+        setToolbarItems(defaultList)
+    }
+
+    // Custom Message Templates Storage
+    val customCardTemplates = MutableStateFlow<List<ExpressiveSticker>>(loadCustomCardTemplates())
+
+    private fun loadCustomCardTemplates(): List<ExpressiveSticker> {
+        val raw = prefs.getString("pref_custom_card_templates_json", null) ?: return emptyList()
+        val list = mutableListOf<ExpressiveSticker>()
+        try {
+            val arr = org.json.JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val colorArr = obj.optJSONArray("gradientColors")
+                val colors = mutableListOf<Long>()
+                if (colorArr != null) {
+                    for (c in 0 until colorArr.length()) {
+                        colors.add(colorArr.getLong(c))
+                    }
+                }
+                if (colors.isEmpty()) {
+                    colors.add(0xFF6366F1)
+                    colors.add(0xFF4F46E5)
+                }
+                list.add(
+                    ExpressiveSticker(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        textToInsert = obj.getString("textToInsert"),
+                        category = obj.optString("category", "📌 My Templates"),
+                        iconBadge = obj.optString("iconBadge", "✨"),
+                        gradientColors = colors,
+                        subtext = obj.optString("subtext", ""),
+                        isUserCreated = true
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun saveCustomCardTemplate(
+        title: String,
+        textToInsert: String,
+        category: String,
+        iconBadge: String,
+        gradientColors: List<Long>,
+        subtext: String
+    ) {
+        val current = loadCustomCardTemplates().toMutableList()
+        val newCard = ExpressiveSticker(
+            id = "user_card_${System.currentTimeMillis()}",
+            title = title.trim(),
+            textToInsert = textToInsert.trim(),
+            category = category,
+            iconBadge = iconBadge.ifBlank { "✨" },
+            gradientColors = gradientColors.ifEmpty { listOf(0xFF6366F1, 0xFF4F46E5) },
+            subtext = subtext.trim(),
+            isUserCreated = true
+        )
+        current.add(0, newCard)
+        persistCardTemplates(current)
+    }
+
+    fun deleteCustomCardTemplate(id: String) {
+        val current = loadCustomCardTemplates().filter { it.id != id }
+        persistCardTemplates(current)
+    }
+
+    private fun persistCardTemplates(cards: List<ExpressiveSticker>) {
+        try {
+            val arr = org.json.JSONArray()
+            for (c in cards) {
+                val obj = org.json.JSONObject()
+                obj.put("id", c.id)
+                obj.put("title", c.title)
+                obj.put("textToInsert", c.textToInsert)
+                obj.put("category", c.category)
+                obj.put("iconBadge", c.iconBadge)
+                obj.put("subtext", c.subtext)
+                val cArr = org.json.JSONArray()
+                c.gradientColors.forEach { cArr.put(it) }
+                obj.put("gradientColors", cArr)
+                arr.put(obj)
+            }
+            prefs.edit().putString("pref_custom_card_templates_json", arr.toString()).apply()
+            customCardTemplates.value = cards
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun loadCustomTemplates(): List<MessageTemplate> {
+        val raw = prefs.getString("pref_custom_templates_json", null) ?: return emptyList()
+        val list = mutableListOf<MessageTemplate>()
+        try {
+            val arr = org.json.JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    MessageTemplate(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        content = obj.getString("content"),
+                        category = obj.optString("category", TemplateCatalog.CAT_CUSTOM),
+                        isUserCreated = true
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    fun saveCustomTemplate(title: String, content: String, category: String) {
+        val current = loadCustomTemplates().toMutableList()
+        val newTemplate = MessageTemplate(
+            id = "user_${System.currentTimeMillis()}",
+            title = title.trim(),
+            content = content.trim(),
+            category = category,
+            isUserCreated = true
+        )
+        current.add(0, newTemplate)
+        persistTemplates(current)
+    }
+
+    fun deleteCustomTemplate(templateId: String) {
+        val current = loadCustomTemplates().filter { it.id != templateId }
+        persistTemplates(current)
+    }
+
+    private fun persistTemplates(templates: List<MessageTemplate>) {
+        try {
+            val arr = org.json.JSONArray()
+            for (t in templates) {
+                val obj = org.json.JSONObject()
+                obj.put("id", t.id)
+                obj.put("title", t.title)
+                obj.put("content", t.content)
+                obj.put("category", t.category)
+                arr.put(obj)
+            }
+            prefs.edit().putString("pref_custom_templates_json", arr.toString()).apply()
+            customTemplates.value = templates
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // Theme Store & Unlocking System
@@ -483,6 +659,15 @@ class LingoKeyPreferences(context: Context) {
         smartReplyUsageCount.value = current
         prefs.edit().putInt(KEY_SMART_REPLY_USAGE_COUNT, current).apply()
         return true
+    }
+
+    fun setCreditsForTesting(amount: Int) {
+        creditsManager.setCreditsForTesting(amount)
+    }
+
+    fun resetSmartReplyUsageForTesting() {
+        smartReplyUsageCount.value = 0
+        prefs.edit().putInt(KEY_SMART_REPLY_USAGE_COUNT, 0).apply()
     }
 
     companion object {

@@ -70,7 +70,8 @@ fun DashboardScreen(
     onRestartOnboarding: () -> Unit,
     onNavigateToSmartReply: () -> Unit = {},
     onNavigateToSpinAndWin: () -> Unit = {},
-    onNavigateToStore: () -> Unit = {}
+    onNavigateToStore: () -> Unit = {},
+    onNavigateToTranslate: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -126,180 +127,21 @@ fun DashboardScreen(
     Scaffold(
         containerColor = bgColor,
         topBar = {
-            Surface(
-                color = cardBg,
-                shadowElevation = 6.dp,
-                shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (isDarkMode) Color.White.copy(alpha = 0.12f) else Color(0x28000000)
-                )
-            ) {
-                TopAppBar(
-                    title = {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(end = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Left: 3D Embossed Logo & App Name
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    shadowElevation = 4.dp,
-                                    border = BorderStroke(1.2.dp, Color(0x6610B981)),
-                                    modifier = Modifier.size(38.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(
-                                                Brush.linearGradient(
-                                                    listOf(Color(0xFF059669), Color(0xFF10B981), Color(0xFF34D399))
-                                                )
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "म",
-                                            color = Color.White,
-                                            fontSize = 20.sp,
-                                            fontWeight = FontWeight.ExtraBold
-                                        )
-                                    }
-                                }
-                                Column {
-                                    Text(
-                                        "Global Keyboard Dynamic",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.5.sp,
-                                        color = textColor
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF10B981))
-                                        )
-                                        Text(
-                                            "${activeLanguage.displayName} • Active",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color(0xFF10B981)
-                                        )
-                                        if (isPremiumUser) {
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = Color(0xFFF59E0B).copy(alpha = 0.2f)
-                                            ) {
-                                                Text(
-                                                    "VIP",
-                                                    color = Color(0xFFF59E0B),
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Right Corner Icons (Light/Dark Mode toggle, VIP Crown, Help)
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                // 1. Normal White / Dark Mode Toggle Icon
-                                IconButton(onClick = { preferences.toggleDarkMode() }) {
-                                    Icon(
-                                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                        contentDescription = if (isDarkMode) "Switch to Light Mode" else "Switch to Dark Mode",
-                                        tint = if (isDarkMode) Color(0xFFFBBF24) else Color(0xFF059669),
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-
-                                // 2. VIP / In-App Purchase Icon
-                                IconButton(onClick = onNavigateToPro) {
-                                    Icon(
-                                        imageVector = Icons.Default.WorkspacePremium,
-                                        contentDescription = "VIP / PRO Upgrades",
-                                        tint = if (isPremiumUser) Color(0xFFF59E0B) else Color(0xFF10B981),
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-
-                                // 3. Help / Tutorial Icon
-                                IconButton(onClick = { showHelpDialog = true }) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.HelpOutline,
-                                        contentDescription = "Help & Tutorial",
-                                        tint = textMuted,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
-            }
+            NeumorphicTopHeader(
+                activeLanguageName = activeLanguage.displayName,
+                isPremiumUser = isPremiumUser,
+                isDarkMode = isDarkMode,
+                onToggleDarkMode = { preferences.toggleDarkMode() },
+                onOpenVip = { selectedTab = 1 },
+                onOpenHelp = { showHelpDialog = true }
+            )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = navBarBg,
-                contentColor = textColor
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.Keyboard, contentDescription = "Layouts") },
-                    label = { Text("Layouts", fontSize = 12.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        indicatorColor = if (isDarkMode) Color(0xFF064E3B) else Color(0xFFD1FAE5),
-                        unselectedIconColor = textMuted,
-                        unselectedTextColor = textMuted
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Palette, contentDescription = "Themes") },
-                    label = { Text("Themes", fontSize = 12.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        indicatorColor = if (isDarkMode) Color(0xFF064E3B) else Color(0xFFD1FAE5),
-                        unselectedIconColor = textMuted,
-                        unselectedTextColor = textMuted
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                    label = { Text("Settings", fontSize = 12.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF10B981),
-                        selectedTextColor = Color(0xFF10B981),
-                        indicatorColor = if (isDarkMode) Color(0xFF064E3B) else Color(0xFFD1FAE5),
-                        unselectedIconColor = textMuted,
-                        unselectedTextColor = textMuted
-                    )
-                )
-            }
+            NeumorphicBottomBar(
+                selectedTab = selectedTab,
+                onTabSelected = { selectedTab = it },
+                isDarkMode = isDarkMode
+            )
         }
     ) { innerPadding ->
         Box(
@@ -309,7 +151,7 @@ fun DashboardScreen(
                 .background(bgColor)
         ) {
             when (selectedTab) {
-                0 -> LayoutsTab(
+                0 -> HomeTab(
                     context = context,
                     preferences = preferences,
                     activeLanguage = activeLanguage,
@@ -324,20 +166,17 @@ fun DashboardScreen(
                     onNavigateToVoiceSettings = onNavigateToVoiceSettings,
                     onNavigateToAISettings = onNavigateToAISettings,
                     onNavigateToSmartReply = onNavigateToSmartReply,
-                    onNavigateToPro = onNavigateToPro,
+                    onNavigateToPro = { selectedTab = 1 },
                     onRestartOnboarding = onRestartOnboarding,
                     onNavigateToSpinAndWin = onNavigateToSpinAndWin,
-                    onNavigateToStore = onNavigateToStore
+                    onNavigateToStore = onNavigateToStore,
+                    onNavigateToTranslate = onNavigateToTranslate
                 )
-                1 -> ThemesTab(
+                1 -> ProVipTab(
+                    context = context,
                     preferences = preferences,
-                    currentTheme = currentTheme,
-                    showKeyBorders = showKeyBorders,
                     isDarkMode = isDarkMode,
-                    isPremiumUser = isPremiumUser,
-                    onToggleKeyBorders = { preferences.setShowKeyBorders(it) },
-                    onNavigateToFullThemes = onNavigateToThemes,
-                    onNavigateToPro = onNavigateToPro
+                    isPremiumUser = isPremiumUser
                 )
                 2 -> SettingsTab(
                     preferences = preferences,
@@ -358,7 +197,7 @@ fun DashboardScreen(
                     onNavigateToAISettings = onNavigateToAISettings,
                     onNavigateToSmartReply = onNavigateToSmartReply,
                     onNavigateToPrivacy = onNavigateToPrivacy,
-                    onNavigateToPro = onNavigateToPro,
+                    onNavigateToPro = { selectedTab = 1 },
                     onRestartOnboarding = onRestartOnboarding,
                     onNavigateToSpinAndWin = onNavigateToSpinAndWin
                 )
@@ -398,7 +237,7 @@ fun DashboardScreen(
 }
 
 @Composable
-fun LayoutsTab(
+fun HomeTab(
     context: Context,
     preferences: LingoKeyPreferences,
     activeLanguage: Language,
@@ -416,7 +255,8 @@ fun LayoutsTab(
     onNavigateToPro: () -> Unit,
     onRestartOnboarding: () -> Unit,
     onNavigateToSpinAndWin: () -> Unit = {},
-    onNavigateToStore: () -> Unit = {}
+    onNavigateToStore: () -> Unit = {},
+    onNavigateToTranslate: () -> Unit = {}
 ) {
     val aiCredits by preferences.aiCredits.collectAsState()
     val spinsRemainingToday by preferences.spinsRemainingToday.collectAsState()
@@ -519,12 +359,12 @@ fun LayoutsTab(
             }
         }
 
-        // 2. Feature Cards (Matching image.png layout, styling, text, and icons)
+        // 2. Primary 3D Feature Cards (6 grid cards + horizontal Smart Reply card)
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Row 1: Languages & Voice & Audio (Exact matches from image.png)
+            // Row 1: Languages & Customize Theme
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -538,20 +378,28 @@ fun LayoutsTab(
                     modifier = Modifier.weight(1f)
                 )
                 DashboardFeatureCard(
-                    icon = Icons.Default.Mic,
-                    title = "Voice & Audio",
-                    desc = "TTS & Dictation Engine",
+                    icon = Icons.Default.Palette,
+                    title = "Customize Theme",
+                    desc = "Colors, Gradients & Keys",
                     isDarkMode = isDarkMode,
-                    onClick = onNavigateToVoiceSettings,
+                    onClick = onNavigateToThemes,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            // Row 2: AI Writing & VIP Store (Exact matches from image.png)
+            // Row 2: Instant Translate & AI Writing
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                DashboardFeatureCard(
+                    icon = Icons.Default.GTranslate,
+                    title = "Translate",
+                    desc = "Copy, Paste & Translate",
+                    isDarkMode = isDarkMode,
+                    onClick = onNavigateToTranslate,
+                    modifier = Modifier.weight(1f)
+                )
                 DashboardFeatureCard(
                     icon = Icons.Default.AutoAwesome,
                     title = "AI Writing",
@@ -560,44 +408,36 @@ fun LayoutsTab(
                     onClick = onNavigateToAISettings,
                     modifier = Modifier.weight(1f)
                 )
-                DashboardFeatureCard(
-                    icon = Icons.Default.WorkspacePremium,
-                    title = "VIP Store",
-                    desc = "Unlock All Features",
-                    isDarkMode = isDarkMode,
-                    onClick = onNavigateToPro,
-                    modifier = Modifier.weight(1f)
-                )
             }
 
-            // Row 3: Theme Store & Customize
+            // Row 3: VIP Store & Voice and Tone
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 DashboardFeatureCard(
-                    icon = Icons.Default.Palette,
-                    title = "Theme Store",
-                    desc = "World Cup & 3D Themes",
+                    icon = Icons.Default.WorkspacePremium,
+                    title = "VIP Store",
+                    desc = "Unlock All Features & Themes",
                     isDarkMode = isDarkMode,
                     onClick = onNavigateToStore,
                     modifier = Modifier.weight(1f)
                 )
                 DashboardFeatureCard(
-                    icon = Icons.Default.Tune,
-                    title = "Customize",
-                    desc = "Vibration, Sound & Size",
+                    icon = Icons.Default.Mic,
+                    title = "Voice & Tone",
+                    desc = "TTS, Audio & Dictation",
                     isDarkMode = isDarkMode,
-                    onClick = { showCustomizeDialog = true },
+                    onClick = onNavigateToVoiceSettings,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            // Row 4: ✨ Smart Reply (Full width card matching image.png bottom)
+            // Row 4: ✨ Smart Reply (Full-width horizontal card)
             DashboardFeatureCard(
                 icon = Icons.Default.AutoAwesome,
                 title = "✨ Smart Reply",
-                desc = "Contextual suggestions for messages",
+                desc = "Contextual suggestions for incoming messages",
                 isDarkMode = isDarkMode,
                 onClick = onNavigateToSmartReply,
                 modifier = Modifier.fillMaxWidth()
@@ -1023,6 +863,388 @@ fun ClipboardManagerDialog(
             }
         }
     )
+}
+
+@Composable
+fun LayoutsTab(
+    context: Context,
+    preferences: LingoKeyPreferences,
+    activeLanguage: Language,
+    isImeEnabled: Boolean,
+    isImeSelected: Boolean,
+    currentTypingStyle: String,
+    isDarkMode: Boolean,
+    isPremiumUser: Boolean,
+    onSelectTypingStyle: (String) -> Unit,
+    onNavigateToLanguages: () -> Unit,
+    onNavigateToThemes: () -> Unit,
+    onNavigateToVoiceSettings: () -> Unit,
+    onNavigateToAISettings: () -> Unit,
+    onNavigateToSmartReply: () -> Unit,
+    onNavigateToPro: () -> Unit,
+    onRestartOnboarding: () -> Unit,
+    onNavigateToSpinAndWin: () -> Unit = {},
+    onNavigateToStore: () -> Unit = {},
+    onNavigateToTranslate: () -> Unit = {}
+) = HomeTab(
+    context = context,
+    preferences = preferences,
+    activeLanguage = activeLanguage,
+    isImeEnabled = isImeEnabled,
+    isImeSelected = isImeSelected,
+    currentTypingStyle = currentTypingStyle,
+    isDarkMode = isDarkMode,
+    isPremiumUser = isPremiumUser,
+    onSelectTypingStyle = onSelectTypingStyle,
+    onNavigateToLanguages = onNavigateToLanguages,
+    onNavigateToThemes = onNavigateToThemes,
+    onNavigateToVoiceSettings = onNavigateToVoiceSettings,
+    onNavigateToAISettings = onNavigateToAISettings,
+    onNavigateToSmartReply = onNavigateToSmartReply,
+    onNavigateToPro = onNavigateToPro,
+    onRestartOnboarding = onRestartOnboarding,
+    onNavigateToSpinAndWin = onNavigateToSpinAndWin,
+    onNavigateToStore = onNavigateToStore,
+    onNavigateToTranslate = onNavigateToTranslate
+)
+
+/**
+ * 3D Neumorphic VIP PRO Tab.
+ * Prominently presents all Pro/VIP features, subscription options, and instant activation.
+ */
+@Composable
+fun ProVipTab(
+    context: Context,
+    preferences: LingoKeyPreferences,
+    isDarkMode: Boolean,
+    isPremiumUser: Boolean
+) {
+    var selectedPlanId by remember { mutableStateOf("annual") }
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // 1. 3D Neumorphic VIP Hero Banner
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
+            isDarkMode = isDarkMode,
+            cornerRadius = 20.dp,
+            elevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // 3D Gold Crown Emblem
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFFF59E0B), Color(0xFFD97706), Color(0xFFB45309))
+                            )
+                        )
+                        .border(1.5.dp, Color(0xFFFDE68A), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WorkspacePremium,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+
+                Text(
+                    text = if (isPremiumUser) "You are a VIP PRO Member" else "Unlock VIP PRO Membership",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = textColor,
+                    textAlign = TextAlign.Center
+                )
+
+                Text(
+                    text = if (isPremiumUser) "Lifetime VIP privileges active: all 15+ luxury themes, unlimited AI writing tools & Namaste HD voices unlocked."
+                    else "Experience zero ads, 15+ VIP themes, infinite AI tone rewrites, HD Namaste neural voice & unlimited custom templates.",
+                    fontSize = 12.sp,
+                    color = textMuted,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 17.sp
+                )
+
+                if (isPremiumUser) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF10B981).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFF10B981))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                            Text("Lifetime VIP Pass Active", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Pricing Plans (3D Neumorphic Selection)
+        Text(
+            text = "Select Subscription Plan",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (isDarkMode) NeumorphicColors.EmeraldAccent else Color(0xFF059669)
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PlanCard(
+                title = "Annual VIP Pass",
+                price = "₹499 / year",
+                periodNote = "Only ₹41/month • 7-day free trial",
+                badge = "BEST VALUE • SAVE 60%",
+                isSelected = selectedPlanId == "annual",
+                isDarkMode = isDarkMode,
+                onClick = { selectedPlanId = "annual" }
+            )
+
+            PlanCard(
+                title = "Lifetime Ultra",
+                price = "₹999 one-time",
+                periodNote = "Pay once, enjoy VIP features forever",
+                badge = "NO RECURRING FEES",
+                isSelected = selectedPlanId == "lifetime",
+                isDarkMode = isDarkMode,
+                onClick = { selectedPlanId = "lifetime" }
+            )
+
+            PlanCard(
+                title = "Monthly Pass",
+                price = "₹99 / month",
+                periodNote = "Flexible subscription • Cancel anytime",
+                badge = null,
+                isSelected = selectedPlanId == "monthly",
+                isDarkMode = isDarkMode,
+                onClick = { selectedPlanId = "monthly" }
+            )
+        }
+
+        // 3. 3D Action Button
+        Button(
+            onClick = {
+                preferences.activatePro()
+                Toast.makeText(context, "🎉 Welcome to VIP PRO! All features unlocked successfully.", Toast.LENGTH_LONG).show()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF059669)
+            ),
+            shape = RoundedCornerShape(16.dp),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.WorkspacePremium, contentDescription = null, tint = Color(0xFFFDE68A), modifier = Modifier.size(20.dp))
+                Text(
+                    text = if (isPremiumUser) "VIP PRO ACTIVATED" else "UPGRADE TO VIP PRO NOW",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.sp,
+                    letterSpacing = 0.5.sp,
+                    color = Color.White
+                )
+            }
+        }
+
+        // 4. VIP Features List (3D Neumorphic Grid / Cards)
+        Text(
+            text = "VIP PRO Exclusive Privileges",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (isDarkMode) NeumorphicColors.EmeraldAccent else Color(0xFF059669)
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            VipBenefitRow(Icons.Default.Palette, "15+ Luxury Themes", "Exclusive Neon, Cyberpunk, AMOLED & Gold VIP styles", isDarkMode)
+            VipBenefitRow(Icons.Default.AutoAwesome, "Unlimited AI Writing", "Infinite AI rewrites, tone changing & smart grammar checks", isDarkMode)
+            VipBenefitRow(Icons.Default.Mic, "HD Neural Voice & Namaste Audio", "Premium neural TTS output & continuous dictation engine", isDarkMode)
+            VipBenefitRow(Icons.Default.Block, "100% Zero Ads Guarantee", "Enjoy completely ad-free setup & keyboard experience", isDarkMode)
+            VipBenefitRow(Icons.Default.DashboardCustomize, "Unlimited Custom Card Templates", "Create, customize & save infinite cards on the keyboard", isDarkMode)
+            VipBenefitRow(Icons.Default.Bolt, "Ultra-Fast Cloud Transliteration", "Priority phonetic engine with near-zero latency", isDarkMode)
+        }
+
+        // 5. Restore Purchase & Security Note
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = {
+                    preferences.restorePurchases()
+                    Toast.makeText(context, "Purchases restored successfully!", Toast.LENGTH_SHORT).show()
+                }
+            ) {
+                Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp), tint = textMuted)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Restore Purchases", color = textMuted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanCard(
+    title: String,
+    price: String,
+    periodNote: String,
+    badge: String?,
+    isSelected: Boolean,
+    isDarkMode: Boolean,
+    onClick: () -> Unit
+) {
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+
+    val wellBrush = if (isDarkMode) {
+        Brush.linearGradient(listOf(NeumorphicColors.DarkWellTop, NeumorphicColors.DarkWellBottom))
+    } else {
+        Brush.linearGradient(listOf(NeumorphicColors.LightWellTop, NeumorphicColors.LightWellBottom))
+    }
+
+    NeumorphicCard(
+        modifier = Modifier.fillMaxWidth(),
+        isDarkMode = isDarkMode,
+        cornerRadius = 16.dp,
+        elevation = if (isSelected) 3.dp else 6.dp,
+        onClick = onClick
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isSelected) Modifier
+                        .background(wellBrush)
+                        .border(1.5.dp, Color(0xFFF59E0B), RoundedCornerShape(16.dp))
+                    else Modifier
+                )
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .border(
+                                2.dp,
+                                if (isSelected) Color(0xFFF59E0B) else textMuted.copy(alpha = 0.5f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF59E0B))
+                            )
+                        }
+                    }
+
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
+                            if (badge != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFF59E0B).copy(alpha = 0.18f)
+                                ) {
+                                    Text(
+                                        badge,
+                                        color = Color(0xFFF59E0B),
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Text(periodNote, fontSize = 11.sp, color = textMuted)
+                    }
+                }
+
+                Text(
+                    price,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp,
+                    color = if (isSelected) Color(0xFFF59E0B) else textColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VipBenefitRow(
+    icon: ImageVector,
+    title: String,
+    desc: String,
+    isDarkMode: Boolean
+) {
+    val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
+    val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (isDarkMode) Color(0xFF064E3B).copy(alpha = 0.4f)
+                    else Color(0xFFD1FAE5)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = NeumorphicColors.EmeraldAccent, modifier = Modifier.size(17.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = textColor)
+            Text(desc, fontSize = 11.sp, color = textMuted, maxLines = 1)
+        }
+    }
 }
 
 @Composable

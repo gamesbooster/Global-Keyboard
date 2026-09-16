@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,7 +10,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Policy
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -144,6 +149,59 @@ fun PrivacyScreen(
                         Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Clear All Clipboard History")
+                    }
+                }
+            }
+
+            Text("Google Play Data Safety & Support", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Policy, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                        Text("Google Play Compliance", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    Text(
+                        "This keyboard does NOT sell, rent, or monetize your personal information. Regular typing keystrokes are processed strictly on-device. When AI tools are used, prompts are transmitted securely via encrypted HTTPS directly to Google Gemini APIs and are never used to train global advertising profiles.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+
+                    HorizontalDivider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(16.dp))
+                            Text("Support & Privacy Inquiries", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        TextButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                        data = Uri.parse("mailto:rajeshchoukhe6@gmail.com")
+                                        putExtra(Intent.EXTRA_SUBJECT, "Global Keyboard Dynamic - Privacy Inquiry")
+                                    }
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Contact: rajeshchoukhe6@gmail.com", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        ) {
+                            Text("Email Us", fontSize = 12.sp)
+                        }
                     }
                 }
             }

@@ -48,6 +48,23 @@ data class StoreThemeItem(
     val graphicType: String // "spain_crest", "spain_trophy", "spain_player", "argentina_stars", "argentina_cup", "cyberpunk", "gold"
 )
 
+data class StoreWallpaperItem(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val creditPrice: Int,
+    val colors: List<Color>,
+    val emoji: String
+)
+
+data class StoreSoundItem(
+    val id: String,
+    val title: String,
+    val description: String,
+    val creditPrice: Int,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StoreScreen(
@@ -68,6 +85,8 @@ fun StoreScreen(
 
     var showUnlockDialog by remember { mutableStateOf<StoreThemeItem?>(null) }
     var showInsufficientCreditsDialog by remember { mutableStateOf<StoreThemeItem?>(null) }
+    var showWallpaperDialog by remember { mutableStateOf<StoreWallpaperItem?>(null) }
+    var showSoundDialog by remember { mutableStateOf<StoreSoundItem?>(null) }
     var toastMessage by remember { mutableStateOf<String?>(null) }
 
     val bgColor = if (isDarkMode) Color(0xFF0F0F14) else Color(0xFFF8FAFC)
@@ -148,6 +167,72 @@ fun StoreScreen(
             themeRef = KeyboardTheme.CARBON_GOLD,
             previewGradient = listOf(Color(0xFF121212), Color(0xFF282828), Color(0xFFEAB308)),
             graphicType = "gold"
+        )
+    )
+
+    val wallpapers = listOf(
+        StoreWallpaperItem(
+            id = "wp_galaxy",
+            title = "Deep Nebula Galaxy",
+            subtitle = "Cosmic starfield backdrop",
+            creditPrice = 30,
+            colors = listOf(Color(0xFF0F0C29), Color(0xFF302B63), Color(0xFF24243E)),
+            emoji = "🌌"
+        ),
+        StoreWallpaperItem(
+            id = "wp_sunset",
+            title = "Sunset Aurora Flame",
+            subtitle = "Vibrant dusk sky glow",
+            creditPrice = 30,
+            colors = listOf(Color(0xFF2D112C), Color(0xFF5A1846), Color(0xFFC70039)),
+            emoji = "🌅"
+        ),
+        StoreWallpaperItem(
+            id = "wp_cyber",
+            title = "Cyber Grid 2099",
+            subtitle = "Futuristic synthwave glow",
+            creditPrice = 40,
+            colors = listOf(Color(0xFF03001E), Color(0xFF7303C0), Color(0xFFEC38BC)),
+            emoji = "⚡"
+        ),
+        StoreWallpaperItem(
+            id = "wp_emerald",
+            title = "Emerald Jade Forest",
+            subtitle = "Lush deep green serenity",
+            creditPrice = 30,
+            colors = listOf(Color(0xFF022C22), Color(0xFF064E3B), Color(0xFF047857)),
+            emoji = "🌲"
+        )
+    )
+
+    val soundPacks = listOf(
+        StoreSoundItem(
+            id = "sound_mx_blue",
+            title = "Cherry MX Blue Clicky",
+            description = "Crisp mechanical click feedback",
+            creditPrice = 25,
+            icon = Icons.Default.Keyboard
+        ),
+        StoreSoundItem(
+            id = "sound_typewriter",
+            title = "Vintage Typewriter",
+            description = "Classic iron hammer keystrokes",
+            creditPrice = 25,
+            icon = Icons.Default.HistoryEdu
+        ),
+        StoreSoundItem(
+            id = "sound_bubble",
+            title = "Water Bubble Pop",
+            description = "Playful organic water pops",
+            creditPrice = 20,
+            icon = Icons.Default.WaterDrop
+        ),
+        StoreSoundItem(
+            id = "sound_digital",
+            title = "Futuristic Cyber Beep",
+            description = "Sci-fi console keystroke acoustic feedback",
+            creditPrice = 30,
+            icon = Icons.Default.GraphicEq
         )
     )
 
@@ -388,7 +473,277 @@ fun StoreScreen(
                     }
                 }
             }
+
+            // 5. Category: Keyboard Wallpapers & HD Backdrops
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column {
+                        Text(
+                            "Wallpapers & HD Backdrops",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = textColor
+                        )
+                        Text(
+                            "Stunning atmospheric backdrops with custom transparent keys",
+                            fontSize = 12.sp,
+                            color = textMuted
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        wallpapers.take(2).forEach { wp ->
+                            val isUnlocked = unlockedThemeIds.contains(wp.id) || isPremiumUser
+                            StoreWallpaperCard(
+                                item = wp,
+                                isUnlocked = isUnlocked,
+                                isDarkMode = isDarkMode,
+                                modifier = Modifier.weight(1f),
+                                onAction = {
+                                    if (isUnlocked) {
+                                        preferences.setCustomTheme(
+                                            name = wp.title,
+                                            bgGradient = wp.colors,
+                                            keyColor = Color.White.copy(alpha = 0.20f),
+                                            textColor = Color.White,
+                                            accentColor = wp.colors.lastOrNull() ?: Color(0xFF6366F1),
+                                            keyAlpha = 0.85f
+                                        )
+                                        Toast.makeText(context, "🎉 ${wp.title} wallpaper applied!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        if (aiCredits >= wp.creditPrice) {
+                                            showWallpaperDialog = wp
+                                        } else {
+                                            showInsufficientCreditsDialog = StoreThemeItem(
+                                                id = wp.id,
+                                                title = wp.title,
+                                                creditPrice = wp.creditPrice,
+                                                badgeLabel = "${wp.creditPrice} Credits",
+                                                themeRef = KeyboardTheme.CLASSIC_DARK,
+                                                previewGradient = wp.colors,
+                                                graphicType = "gold"
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        wallpapers.drop(2).take(2).forEach { wp ->
+                            val isUnlocked = unlockedThemeIds.contains(wp.id) || isPremiumUser
+                            StoreWallpaperCard(
+                                item = wp,
+                                isUnlocked = isUnlocked,
+                                isDarkMode = isDarkMode,
+                                modifier = Modifier.weight(1f),
+                                onAction = {
+                                    if (isUnlocked) {
+                                        preferences.setCustomTheme(
+                                            name = wp.title,
+                                            bgGradient = wp.colors,
+                                            keyColor = Color.White.copy(alpha = 0.20f),
+                                            textColor = Color.White,
+                                            accentColor = wp.colors.lastOrNull() ?: Color(0xFF6366F1),
+                                            keyAlpha = 0.85f
+                                        )
+                                        Toast.makeText(context, "🎉 ${wp.title} wallpaper applied!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        if (aiCredits >= wp.creditPrice) {
+                                            showWallpaperDialog = wp
+                                        } else {
+                                            showInsufficientCreditsDialog = StoreThemeItem(
+                                                id = wp.id,
+                                                title = wp.title,
+                                                creditPrice = wp.creditPrice,
+                                                badgeLabel = "${wp.creditPrice} Credits",
+                                                themeRef = KeyboardTheme.CLASSIC_DARK,
+                                                previewGradient = wp.colors,
+                                                graphicType = "gold"
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 6. Category: Mechanical & Audio Sound Packs
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column {
+                        Text(
+                            "Key Sound Packs & Effects",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = textColor
+                        )
+                        Text(
+                            "Realistic acoustic feedback for typing precision",
+                            fontSize = 12.sp,
+                            color = textMuted
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        soundPacks.take(2).forEach { sp ->
+                            val isUnlocked = unlockedThemeIds.contains(sp.id) || isPremiumUser
+                            StoreSoundCard(
+                                item = sp,
+                                isUnlocked = isUnlocked,
+                                isDarkMode = isDarkMode,
+                                modifier = Modifier.weight(1f),
+                                onAction = {
+                                    if (isUnlocked) {
+                                        Toast.makeText(context, "🔊 ${sp.title} sound enabled!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        if (aiCredits >= sp.creditPrice) {
+                                            showSoundDialog = sp
+                                        } else {
+                                            showInsufficientCreditsDialog = StoreThemeItem(
+                                                id = sp.id,
+                                                title = sp.title,
+                                                creditPrice = sp.creditPrice,
+                                                badgeLabel = "${sp.creditPrice} Credits",
+                                                themeRef = KeyboardTheme.CLASSIC_DARK,
+                                                previewGradient = listOf(Color(0xFF1E1B4B), Color(0xFF312E81)),
+                                                graphicType = "gold"
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        soundPacks.drop(2).take(2).forEach { sp ->
+                            val isUnlocked = unlockedThemeIds.contains(sp.id) || isPremiumUser
+                            StoreSoundCard(
+                                item = sp,
+                                isUnlocked = isUnlocked,
+                                isDarkMode = isDarkMode,
+                                modifier = Modifier.weight(1f),
+                                onAction = {
+                                    if (isUnlocked) {
+                                        Toast.makeText(context, "🔊 ${sp.title} sound enabled!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        if (aiCredits >= sp.creditPrice) {
+                                            showSoundDialog = sp
+                                        } else {
+                                            showInsufficientCreditsDialog = StoreThemeItem(
+                                                id = sp.id,
+                                                title = sp.title,
+                                                creditPrice = sp.creditPrice,
+                                                badgeLabel = "${sp.creditPrice} Credits",
+                                                themeRef = KeyboardTheme.CLASSIC_DARK,
+                                                previewGradient = listOf(Color(0xFF1E1B4B), Color(0xFF312E81)),
+                                                graphicType = "gold"
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Wallpaper Unlock Dialog
+    showWallpaperDialog?.let { wp ->
+        AlertDialog(
+            onDismissRequest = { showWallpaperDialog = null },
+            title = { Text("Unlock ${wp.title}?", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("This custom keyboard wallpaper costs ${wp.creditPrice} AI credits.")
+                    Text("Your Current Balance: $aiCredits Credits 🪙", fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val success = preferences.unlockThemeWithCredits(wp.id, wp.creditPrice)
+                        if (success) {
+                            preferences.setCustomTheme(
+                                name = wp.title,
+                                bgGradient = wp.colors,
+                                keyColor = Color.White.copy(alpha = 0.20f),
+                                textColor = Color.White,
+                                accentColor = wp.colors.lastOrNull() ?: Color(0xFF6366F1),
+                                keyAlpha = 0.85f
+                            )
+                            Toast.makeText(context, "🎉 ${wp.title} wallpaper unlocked and applied!", Toast.LENGTH_SHORT).show()
+                        }
+                        showWallpaperDialog = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                ) {
+                    Text("Unlock & Apply", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWallpaperDialog = null }) { Text("Cancel", color = textMuted) }
+            }
+        )
+    }
+
+    // Sound Pack Unlock Dialog
+    showSoundDialog?.let { sp ->
+        AlertDialog(
+            onDismissRequest = { showSoundDialog = null },
+            title = { Text("Unlock ${sp.title}?", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("This keystroke sound pack costs ${sp.creditPrice} AI credits.")
+                    Text("Your Current Balance: $aiCredits Credits 🪙", fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val success = preferences.unlockThemeWithCredits(sp.id, sp.creditPrice)
+                        if (success) {
+                            Toast.makeText(context, "🔊 ${sp.title} unlocked and active!", Toast.LENGTH_SHORT).show()
+                        }
+                        showSoundDialog = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                ) {
+                    Text("Unlock Sound Pack", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSoundDialog = null }) { Text("Cancel", color = textMuted) }
+            }
+        )
     }
 
     // Unlock Confirmation Dialog
@@ -845,6 +1200,134 @@ fun StoreThemeGridCard(
                     else if (isUnlocked) Color(0xFF10B981)
                     else Color(0xFFEAB308),
                     textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StoreWallpaperCard(
+    item: StoreWallpaperItem,
+    isUnlocked: Boolean,
+    isDarkMode: Boolean,
+    modifier: Modifier = Modifier,
+    onAction: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)),
+        border = BorderStroke(1.dp, if (isDarkMode) Color(0xFF282A3A) else Color(0xFFE2E8F0)),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onAction() }
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(95.dp)
+                    .background(Brush.verticalGradient(item.colors)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(item.emoji, fontSize = 32.sp)
+
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (isUnlocked) Color(0xFF10B981) else Color(0xFFEAB308),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                ) {
+                    Text(
+                        if (isUnlocked) "Unlocked" else "🪙 ${item.creditPrice}",
+                        color = Color.Black,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    item.title,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDarkMode) Color.White else Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    if (isUnlocked) "Tap to Apply" else "🪙 ${item.creditPrice} Credits",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (isUnlocked) Color(0xFF10B981) else Color(0xFFEAB308)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StoreSoundCard(
+    item: StoreSoundItem,
+    isUnlocked: Boolean,
+    isDarkMode: Boolean,
+    modifier: Modifier = Modifier,
+    onAction: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isDarkMode) Color(0xFF181924) else Color(0xFFFFFFFF)),
+        border = BorderStroke(1.dp, if (isDarkMode) Color(0xFF282A3A) else Color(0xFFE2E8F0)),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onAction() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF6366F1).copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(item.icon, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(22.dp))
+            }
+
+            Text(
+                item.title,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDarkMode) Color.White else Color(0xFF0F172A),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (isUnlocked) Color(0xFF10B981).copy(alpha = 0.2f) else Color(0xFFEAB308).copy(alpha = 0.2f),
+                border = BorderStroke(0.8.dp, if (isUnlocked) Color(0xFF10B981) else Color(0xFFEAB308))
+            ) {
+                Text(
+                    text = if (isUnlocked) "Active ✓" else "🪙 ${item.creditPrice}",
+                    color = if (isUnlocked) Color(0xFF10B981) else Color(0xFFEAB308),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
         }

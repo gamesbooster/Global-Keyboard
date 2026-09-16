@@ -13,6 +13,9 @@ class ClipboardRepository(context: Context) {
     private val _items = MutableStateFlow<List<ClipboardItem>>(emptyList())
     val items: StateFlow<List<ClipboardItem>> = _items.asStateFlow()
 
+    private val _latestClip = MutableStateFlow<String?>(null)
+    val latestClip: StateFlow<String?> = _latestClip.asStateFlow()
+
     init {
         loadClips()
     }
@@ -70,11 +73,31 @@ class ClipboardRepository(context: Context) {
         // Remove if duplicate text exists
         current.removeAll { it.text == text && !it.isPinned }
         current.add(0, ClipboardItem(text = text.trim()))
-        // Keep max 25 items, preserving pinned
+        // Keep max 50 items, preserving pinned
         val pinned = current.filter { it.isPinned }
-        val unpinned = current.filter { !it.isPinned }.take(25)
+        val unpinned = current.filter { !it.isPinned }.take(50)
         _items.value = pinned + unpinned
+        _latestClip.value = text.trim()
         saveClips()
+    }
+
+    /**
+     * Safely receives clipboard item from Android system IME clipboard listener.
+     * Compliant with Google Play policies: strictly stored locally, never transmitted externally.
+     */
+    fun addSystemClip(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        val firstExisting = _items.value.firstOrNull()?.text
+        if (firstExisting != trimmed) {
+            addClip(trimmed)
+        } else {
+            _latestClip.value = trimmed
+        }
+    }
+
+    fun dismissLatestClip() {
+        _latestClip.value = null
     }
 
     fun togglePin(id: Long) {
