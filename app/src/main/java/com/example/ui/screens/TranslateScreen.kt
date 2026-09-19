@@ -40,25 +40,39 @@ import com.example.ui.components.NeumorphicCard
 import com.example.ui.components.NeumorphicColors
 import kotlinx.coroutines.launch
 
-data class TransLang(val code: String, val name: String, val nativeName: String)
+data class TransLang(val code: String, val name: String, val nativeName: String, val flagEmoji: String = "🌐")
 
 val SUPPORTED_TRANSLATION_LANGUAGES = listOf(
-    TransLang("en", "English", "English"),
-    TransLang("hi", "Hindi", "हिन्दी"),
-    TransLang("mr", "Marathi", "मराठी"),
-    TransLang("bn", "Bengali", "বাংলা"),
-    TransLang("ta", "Tamil", "தமிழ்"),
-    TransLang("te", "Telugu", "తెలుగు"),
-    TransLang("gu", "Gujarati", "ગુજરાતી"),
-    TransLang("kn", "Kannada", "ಕನ್ನಡ"),
-    TransLang("ml", "Malayalam", "മലയാളം"),
-    TransLang("pa", "Punjabi", "ਪੰਜਾਬੀ"),
-    TransLang("ur", "Urdu", "اردو"),
-    TransLang("es", "Spanish", "Español"),
-    TransLang("fr", "French", "Français"),
-    TransLang("de", "German", "Deutsch"),
-    TransLang("ar", "Arabic", "العربية"),
-    TransLang("ja", "Japanese", "日本語")
+    TransLang("en", "English", "English", "🇺🇸"),
+    TransLang("hi", "Hindi", "हिन्दी", "🇮🇳"),
+    TransLang("hinglish", "Hinglish", "हिंग्लिश (Phonetic)", "🇮🇳"),
+    TransLang("mr", "Marathi", "मराठी", "🇮🇳"),
+    TransLang("bn", "Bengali", "বাংলা", "🇧🇩"),
+    TransLang("te", "Telugu", "తెలుగు", "🇮🇳"),
+    TransLang("ta", "Tamil", "தமிழ்", "🇮🇳"),
+    TransLang("gu", "Gujarati", "ગુજરાતી", "🇮🇳"),
+    TransLang("kn", "Kannada", "ಕನ್ನಡ", "🇮🇳"),
+    TransLang("ml", "Malayalam", "മലയാളം", "🇮🇳"),
+    TransLang("pa", "Punjabi", "ਪੰਜਾਬੀ", "🇮🇳"),
+    TransLang("ur", "Urdu", "اردو", "🇵🇰"),
+    TransLang("es", "Spanish", "Español", "🇪🇸"),
+    TransLang("fr", "French", "Français", "🇫🇷"),
+    TransLang("de", "German", "Deutsch", "🇩🇪"),
+    TransLang("ar", "Arabic", "العربية", "🇸🇦"),
+    TransLang("pt", "Portuguese", "Português", "🇧🇷"),
+    TransLang("ru", "Russian", "Русский", "🇷🇺"),
+    TransLang("it", "Italian", "Italiano", "🇮🇹"),
+    TransLang("ja", "Japanese", "日本語", "🇯🇵"),
+    TransLang("ko", "Korean", "한국어", "🇰🇷"),
+    TransLang("zh", "Chinese", "中文 (简体)", "🇨🇳"),
+    TransLang("tr", "Turkish", "Türkçe", "🇹🇷"),
+    TransLang("id", "Indonesian", "Bahasa Indonesia", "🇮🇩"),
+    TransLang("vi", "Vietnamese", "Tiếng Việt", "🇻🇳"),
+    TransLang("nl", "Dutch", "Nederlands", "🇳🇱"),
+    TransLang("pl", "Polish", "Polski", "🇵🇱"),
+    TransLang("th", "Thai", "ไทย", "🇹🇭"),
+    TransLang("fa", "Persian", "فارسی", "🇮🇷"),
+    TransLang("fil", "Filipino", "Tagalog", "🇵🇭")
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -180,10 +194,17 @@ fun TranslateScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column {
-                                Text("FROM", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = NeumorphicColors.EmeraldAccent)
-                                Text(sourceLang.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
-                                Text(sourceLang.nativeName, fontSize = 11.sp, color = textMuted)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                Text(sourceLang.flagEmoji, fontSize = 20.sp)
+                                Column {
+                                    Text("FROM", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = NeumorphicColors.EmeraldAccent)
+                                    Text(sourceLang.name, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = textColor, maxLines = 1)
+                                    Text(sourceLang.nativeName, fontSize = 10.5.sp, color = textMuted, maxLines = 1)
+                                }
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = textMuted)
                         }
@@ -236,10 +257,17 @@ fun TranslateScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column {
-                                Text("TO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = NeumorphicColors.EmeraldAccent)
-                                Text(targetLang.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
-                                Text(targetLang.nativeName, fontSize = 11.sp, color = textMuted)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                Text(targetLang.flagEmoji, fontSize = 20.sp)
+                                Column {
+                                    Text("TO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = NeumorphicColors.EmeraldAccent)
+                                    Text(targetLang.name, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = textColor, maxLines = 1)
+                                    Text(targetLang.nativeName, fontSize = 10.5.sp, color = textMuted, maxLines = 1)
+                                }
                             }
                             Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = textMuted)
                         }
@@ -625,18 +653,24 @@ private fun LanguagePickerModal(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                lang.name,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 14.sp,
-                                color = if (isDarkMode) Color.White else Color(0xFF0F172A)
-                            )
-                            Text(
-                                lang.nativeName,
-                                fontSize = 11.5.sp,
-                                color = if (isSelected) NeumorphicColors.EmeraldAccent else Color(0xFF94A3B8)
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(lang.flagEmoji, fontSize = 22.sp)
+                            Column {
+                                Text(
+                                    lang.name,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 14.sp,
+                                    color = if (isDarkMode) Color.White else Color(0xFF0F172A)
+                                )
+                                Text(
+                                    lang.nativeName,
+                                    fontSize = 11.5.sp,
+                                    color = if (isSelected) NeumorphicColors.EmeraldAccent else Color(0xFF94A3B8)
+                                )
+                            }
                         }
 
                         if (isSelected) {

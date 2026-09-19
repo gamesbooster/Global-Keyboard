@@ -41,8 +41,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.ads.AdMobRewardedAdManager
 import com.example.data.LingoKeyPreferences
+import com.example.ui.components.GoogleSignInBottomSheet
 import com.example.ui.components.NeumorphicCard
 import com.example.ui.components.NeumorphicColors
+import com.example.ui.components.SignInTriggerReason
 import kotlinx.coroutines.launch
 import kotlin.math.*
 import kotlin.random.Random
@@ -73,6 +75,12 @@ fun SpinAndWinScreen(
     val isPremiumUser by preferences.isPremiumUser.collectAsState()
     val aiCredits by preferences.aiCredits.collectAsState()
     val spinsRemaining by preferences.spinsRemainingToday.collectAsState()
+    val isSignedIn by preferences.isSignedIn.collectAsState()
+    val userEmail by preferences.userEmail.collectAsState()
+    val userDisplayName by preferences.userDisplayName.collectAsState()
+
+    // Just-In-Time Authentication Sheet
+    var showSignInSheet by remember { mutableStateOf(false) }
 
     // Preload AdMob Rewarded Ad immediately upon entering screen
     LaunchedEffect(Unit) {
@@ -126,6 +134,12 @@ fun SpinAndWinScreen(
     fun startSpin() {
         if (isSpinning) return
 
+        // Just-in-time Google Sign-In requirement for daily spins & cloud credit binding
+        if (!isSignedIn) {
+            showSignInSheet = true
+            return
+        }
+
         if (spinsRemaining <= 0) {
             showNoSpinsDialog = true
             return
@@ -164,6 +178,15 @@ fun SpinAndWinScreen(
             // Spin animation completed
             triggerVibration(90L)
             isSpinning = false
+
+            // AdMob Policy & VIP Guarantee: VIP subscribers skip ads immediately
+            if (isPremiumUser) {
+                if (wonAmount > 0) {
+                    preferences.addCredits(wonAmount)
+                }
+                wonCreditsDialog = wonAmount
+                return@launch
+            }
 
             // Before granting reward, present real AdMob Rewarded Ad (strictly max 5 per day)
             val activity = context.findActivity()
@@ -308,6 +331,101 @@ fun SpinAndWinScreen(
                             color = if (spinsRemaining > 0) NeumorphicColors.EmeraldAccent else textMuted,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                         )
+                    }
+                }
+            }
+
+            // Google Account & Cloud Sync Status Banner
+            if (isSignedIn) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDarkMode) Color(0xFF13221B) else Color(0xFFECFDF5),
+                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(17.dp))
+                            Column {
+                                Text(
+                                    "Google Cloud Sync Active",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    userEmail.ifEmpty { "Connected Account" },
+                                    color = textMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFF10B981).copy(alpha = 0.2f)) {
+                            Text("SYNCED", color = Color(0xFF10B981), fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDarkMode) Color(0xFF262013) else Color(0xFFFFFBEB),
+                    border = BorderStroke(1.2.dp, primaryGold.copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showSignInSheet = true }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(primaryGold.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("☁️", fontSize = 16.sp)
+                            }
+                            Column {
+                                Text(
+                                    "Guest Mode (Credits Not Synced)",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDarkMode) Color(0xFFFDE68A) else Color(0xFF92400E)
+                                )
+                                Text(
+                                    "Sign in with Google to claim daily spins & protect credits",
+                                    fontSize = 11.sp,
+                                    color = textMuted
+                                )
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = primaryGold
+                        ) {
+                            Text(
+                                "SIGN IN",
+                                color = Color(0xFF0F172A),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -720,6 +838,18 @@ fun SpinAndWinScreen(
     // "PLEASE READ" TRANSPARENCY MODAL
     if (showHowItWorksDialog) {
         TransparencyModal(onDismiss = { showHowItWorksDialog = false }, isDarkMode = isDarkMode)
+    }
+
+    // JUST-IN-TIME GOOGLE SIGN-IN BOTTOM SHEET
+    if (showSignInSheet) {
+        GoogleSignInBottomSheet(
+            preferences = preferences,
+            reason = SignInTriggerReason.SPIN_AND_WIN,
+            onDismiss = { showSignInSheet = false },
+            onSignInSuccess = {
+                showSignInSheet = false
+            }
+        )
     }
 }
 

@@ -8,6 +8,15 @@ object KeyboardLayouts {
     val NUMBERS_TOP_ROW = listOf("[", "]", "{", "}", "<", ">", "^", "%", "°", "=")
     val SYMBOLS_TOP_ROW = listOf("€", "¥", "£", "¢", "©", "®", "™", "✓", "•", "∆")
 
+    // GBOARD 3x4 DEDICATED NUMERIC PAD LAYOUT
+    val NUMERIC_PAD_LEFT_OPERATORS = listOf("+", "-", "*", "/")
+    val NUMERIC_PAD_DIGIT_GRID = listOf(
+        listOf("1", "2", "3"),
+        listOf("4", "5", "6"),
+        listOf("7", "8", "9")
+    )
+    val NUMERIC_PAD_BOTTOM_ROW = listOf("ABC", ",", "!?#", "0", "=", ".", "ENTER")
+
     val QWERTY_ROWS = listOf(
         listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),
         listOf("a", "s", "d", "f", "g", "h", "j", "k", "l"),

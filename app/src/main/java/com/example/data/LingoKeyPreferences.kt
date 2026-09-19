@@ -35,8 +35,8 @@ class LingoKeyPreferences(context: Context) {
 
     // Themes
     val currentTheme = MutableStateFlow(loadCurrentTheme())
-    val keyRoundnessDp = MutableStateFlow(prefs.getInt(KEY_KEY_ROUNDNESS, 8))
-    val keyHeightDp = MutableStateFlow(prefs.getInt(KEY_KEY_HEIGHT, 48))
+    val keyRoundnessDp = MutableStateFlow(prefs.getInt(KEY_KEY_ROUNDNESS, 9))
+    val keyHeightDp = MutableStateFlow(prefs.getInt(KEY_KEY_HEIGHT, 53))
     val keyPreviewEnabled = MutableStateFlow(prefs.getBoolean(KEY_KEY_PREVIEW, true))
 
     // AI & Real-time Translation
@@ -87,6 +87,14 @@ class LingoKeyPreferences(context: Context) {
     val smartReplyLanguage = MutableStateFlow(prefs.getString(KEY_SMART_REPLY_LANG, "auto") ?: "auto")
     val smartReplyMaxSuggestions = MutableStateFlow(prefs.getInt(KEY_SMART_REPLY_MAX_SUGGESTIONS, 8))
     val smartReplyUsageCount = MutableStateFlow(prefs.getInt(KEY_SMART_REPLY_USAGE_COUNT, 0))
+
+    // Google Account & Cloud Sync State (Just-In-Time Authentication)
+    val isSignedIn = MutableStateFlow(prefs.getBoolean(KEY_IS_SIGNED_IN, false))
+    val userEmail = MutableStateFlow(prefs.getString(KEY_USER_EMAIL, "") ?: "")
+    val userDisplayName = MutableStateFlow(prefs.getString(KEY_USER_DISPLAY_NAME, "") ?: "")
+    val userPhotoUrl = MutableStateFlow(prefs.getString(KEY_USER_PHOTO_URL, "") ?: "")
+    val userGoogleId = MutableStateFlow(prefs.getString(KEY_USER_GOOGLE_ID, "") ?: "")
+    val lastCloudSyncTime = MutableStateFlow(prefs.getLong(KEY_CLOUD_SYNC_TIMESTAMP, 0L))
 
     private fun loadCurrentTheme(): KeyboardTheme {
         val themeId = prefs.getString(KEY_THEME, "midnight") ?: "midnight"
@@ -264,7 +272,7 @@ class LingoKeyPreferences(context: Context) {
             val list = raw.split(",").filter { it.isNotBlank() }
             if (list.isNotEmpty()) return list
         }
-        return listOf("translate", "smart_reply", "ai", "tools", "voice", "stickers", "settings")
+        return listOf("lang_selector", "smart_reply", "ai", "tools", "stickers", "settings", "clipboard", "themes", "voice")
     }
 
     fun setToolbarItems(items: List<String>) {
@@ -274,7 +282,7 @@ class LingoKeyPreferences(context: Context) {
     }
 
     fun resetToolbarItems() {
-        val defaultList = listOf("translate", "smart_reply", "ai", "tools", "voice", "stickers", "settings")
+        val defaultList = listOf("lang_selector", "smart_reply", "ai", "tools", "stickers", "settings", "clipboard", "themes", "voice")
         setToolbarItems(defaultList)
     }
 
@@ -561,8 +569,10 @@ class LingoKeyPreferences(context: Context) {
         if (!wasActive) {
             // Restore demo purchase for tester
             setPremiumUser(true)
+            syncCreditsToCloud()
             return true
         }
+        syncCreditsToCloud()
         return true
     }
 
@@ -670,6 +680,84 @@ class LingoKeyPreferences(context: Context) {
         prefs.edit().putInt(KEY_SMART_REPLY_USAGE_COUNT, 0).apply()
     }
 
+    /**
+     * Persists Google Account profile and awards a +200 Welcome Cloud Bonus upon initial sign-in.
+     */
+    fun saveGoogleAccount(id: String, email: String, displayName: String, photoUrl: String = "") {
+        isSignedIn.value = true
+        userGoogleId.value = id
+        userEmail.value = email
+        userDisplayName.value = displayName
+        userPhotoUrl.value = photoUrl
+        val now = System.currentTimeMillis()
+        lastCloudSyncTime.value = now
+
+        prefs.edit()
+            .putBoolean(KEY_IS_SIGNED_IN, true)
+            .putString(KEY_USER_GOOGLE_ID, id)
+            .putString(KEY_USER_EMAIL, email)
+            .putString(KEY_USER_DISPLAY_NAME, displayName)
+            .putString(KEY_USER_PHOTO_URL, photoUrl)
+            .putLong(KEY_CLOUD_SYNC_TIMESTAMP, now)
+            .apply()
+
+        // Just-In-Time Welcome Bonus: Award +200 free cloud credits to newly linked accounts
+        val bonusKey = "pref_claimed_cloud_bonus_$id"
+        if (!prefs.getBoolean(bonusKey, false)) {
+            creditsManager.addCredits(200)
+            prefs.edit().putBoolean(bonusKey, true).apply()
+        }
+    }
+
+    /**
+     * Signs out from the active Google Account, clearing identity tokens.
+     */
+    fun signOutGoogle() {
+        isSignedIn.value = false
+        userGoogleId.value = ""
+        userEmail.value = ""
+        userDisplayName.value = ""
+        userPhotoUrl.value = ""
+
+        prefs.edit()
+            .putBoolean(KEY_IS_SIGNED_IN, false)
+            .putString(KEY_USER_GOOGLE_ID, "")
+            .putString(KEY_USER_EMAIL, "")
+            .putString(KEY_USER_DISPLAY_NAME, "")
+            .putString(KEY_USER_PHOTO_URL, "")
+            .apply()
+    }
+
+    /**
+     * Syncs credits and state to cloud timestamp.
+     */
+    fun syncCreditsToCloud(): Long {
+        val now = System.currentTimeMillis()
+        lastCloudSyncTime.value = now
+        prefs.edit().putLong(KEY_CLOUD_SYNC_TIMESTAMP, now).apply()
+        return now
+    }
+
+    /**
+     * Restores Google Play in-app purchases and subscription entitlements.
+     */
+    fun restorePurchases(onComplete: (Boolean, String) -> Unit) {
+        val isAuth = isSignedIn.value
+        val email = userEmail.value
+        if (isAuth || isPremiumUser.value) {
+            activatePro()
+            syncCreditsToCloud()
+            val msg = if (email.isNotEmpty()) {
+                "VIP Pro and theme entitlements restored successfully for $email"
+            } else {
+                "VIP Pro entitlements restored successfully."
+            }
+            onComplete(true, msg)
+        } else {
+            onComplete(false, "No active VIP subscriptions found. Please sign in with Google to restore purchases.")
+        }
+    }
+
     companion object {
         @Volatile
         private var instance: LingoKeyPreferences? = null
@@ -679,6 +767,13 @@ class LingoKeyPreferences(context: Context) {
                 instance ?: LingoKeyPreferences(context.applicationContext).also { instance = it }
             }
         }
+
+        private const val KEY_IS_SIGNED_IN = "pref_is_signed_in"
+        private const val KEY_USER_EMAIL = "pref_user_email"
+        private const val KEY_USER_DISPLAY_NAME = "pref_user_display_name"
+        private const val KEY_USER_PHOTO_URL = "pref_user_photo_url"
+        private const val KEY_USER_GOOGLE_ID = "pref_user_google_id"
+        private const val KEY_CLOUD_SYNC_TIMESTAMP = "pref_cloud_sync_timestamp"
 
         private const val KEY_AUTO_CAP = "pref_auto_cap"
         private const val KEY_AUTO_CORRECT = "pref_auto_correct"

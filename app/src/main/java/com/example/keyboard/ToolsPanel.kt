@@ -51,10 +51,19 @@ fun ToolsPanel(
     onOpenLanguages: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCustomizeToolbar: () -> Unit = {},
+    onOpenNumericPad: () -> Unit = {},
     onClose: () -> Unit,
     panelHeight: Dp = 268.dp
 ) {
     val toolItems = listOf(
+        ToolItem(
+            id = "numpad",
+            title = "🔢 Number Pad",
+            subtitle = "Dedicated 3x4 PIN & calculator keypad",
+            icon = Icons.Default.Dialpad,
+            accentColor = Color(0xFF0D9488),
+            onClick = onOpenNumericPad
+        ),
         ToolItem(
             id = "smart_reply",
             title = "✨ Smart Reply",

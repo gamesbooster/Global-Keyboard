@@ -37,7 +37,7 @@ data class KeyboardTheme(
     val keyAlpha: Float = 1.0f,
     val backdropType: String = "solid",
     val themeStyle: ThemeStyle = ThemeStyle.STANDARD,
-    val keyCornerRadius: Float = 6f,
+    val keyCornerRadius: Float = 8f,
     val keyElevation: Float = 1.5f,
     val category: String = "Popular",
     val isPro: Boolean = false

@@ -36,8 +36,9 @@ data class Language(
             // --- Top Priority Languages (English + Top 3) ---
             Language("en", "en", "English", "English", "🇺🇸", LayoutType.QWERTY, true, "en-US", isGlobal = true),
             Language("hi", "hi", "Hindi", "हिन्दी", "🇮🇳", LayoutType.DEVANAGARI, true, "hi-IN", isGlobal = false),
+            Language("hinglish", "hi", "Hinglish", "हिंग्लिश (Phonetic)", "🇮🇳", LayoutType.QWERTY, false, "hi-IN", isGlobal = false),
             Language("mr", "mr", "Marathi", "मराठी", "🇮🇳", LayoutType.DEVANAGARI, false, "mr-IN", isGlobal = false),
-            Language("bn", "bn", "Bengali", "বাংলা", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false),
+            Language("bn", "bn", "Bengali", "বাংলা", "🇧🇩", LayoutType.BENGALI, false, "bn-BD", isGlobal = false),
 
             // --- Global & World Languages ---
             Language("es", "es", "Spanish", "Español", "🇪🇸", LayoutType.QWERTY, false, "es-ES", isGlobal = true),

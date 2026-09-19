@@ -109,18 +109,39 @@ class SmartAIProvider : AIProvider {
 
     override suspend fun customPrompt(prompt: String): Result<String> = withContext(Dispatchers.Default) {
         delay(60)
-        val lower = prompt.lowercase()
+        val trimmed = prompt.trim()
+        val lower = trimmed.lowercase()
         val response = when {
-            lower.contains("leave") || lower.contains("holiday") ->
-                "Dear Sir/Madam,\n\nI am writing to formally request leave for 2 days due to urgent personal matters. I will ensure all pending tasks are delegated beforehand.\n\nThank you for your understanding."
+            lower.startsWith("fix grammar") || lower.startsWith("correct") || lower.contains("grammar:") -> {
+                val textToFix = trimmed.substringAfter(":").ifBlank { trimmed.substringAfter("grammar").trim() }
+                val fixed = applyGrammarRules(textToFix.ifBlank { trimmed })
+                "Here is the grammar-corrected version:\n\n\"$fixed\""
+            }
+            lower.contains("summariz") || lower.contains("summary") -> {
+                val content = trimmed.substringAfter(":").ifBlank { trimmed }
+                val sentences = content.split(Regex("[.!?\n]")).filter { it.trim().length > 8 }
+                if (sentences.isNotEmpty()) {
+                    "📌 Summary Key Points:\n\n" + sentences.take(3).joinToString("\n") { "• ${it.trim().replaceFirstChar { c -> c.uppercase() }}." }
+                } else {
+                    "📌 Summary:\n• Clear focus and intent maintained throughout.\n• Core message delivered concisely without redundant filler."
+                }
+            }
+            lower.contains("leave") || lower.contains("holiday") || lower.contains("sick") ->
+                "Subject: Leave Request - Urgent Personal Matters\n\nDear Sir/Madam,\n\nI am writing to formally request leave for 2 days starting tomorrow due to personal reasons. I have ensured all my pending responsibilities are handed over.\n\nThank you for your understanding and support.\n\nWarm regards,\n[Your Name]"
             lower.contains("thank") || lower.contains("appreciat") ->
-                "Dear Team,\n\nI wanted to express my sincere gratitude for your continuous support and guidance. It has been a pleasure working together."
+                "Dear Team,\n\nI wanted to express my sincere gratitude for your continuous support, collaboration, and guidance. It has been a pleasure working together on this milestone.\n\nBest regards,\n[Your Name]"
             lower.contains("meeting") || lower.contains("reschedule") ->
-                "Hi,\n\nCould we please reschedule our upcoming discussion to tomorrow? Apologies for any inconvenience caused."
+                "Hi,\n\nCould we please reschedule our upcoming discussion to tomorrow afternoon? Apologies for any inconvenience caused, and please let me know if a specific time works best for you.\n\nBest,\n[Your Name]"
             lower.contains("project") || lower.contains("update") ->
-                "Hello,\n\nHere is a quick update: we have completed the initial implementation and are now conducting quality verification. Everything is on schedule."
+                "Hello,\n\nHere is a quick status update: we have completed the current sprint tasks and are finalizing quality checks. Everything is on schedule for delivery.\n\nRegards,\n[Your Name]"
+            lower.contains("email") || lower.contains("mail") ->
+                "Subject: Follow-up & Next Steps\n\nDear [Name],\n\nI hope this email finds you well. I am reaching out to follow up on our previous conversation regarding the project and align on our next action items.\n\nPlease feel free to review the details and let me know your thoughts.\n\nSincerely,\n[Your Name]"
+            lower.contains("reply") || lower.contains("respond") ->
+                "Here are 3 recommended replies for your message:\n\n1. \"Sounds good! Looking forward to catching up soon.\"\n2. \"Thank you for the update. I will review and get back to you shortly.\"\n3. \"Understood! Please let me know if you need any further assistance.\""
+            lower.contains("hinglish") || lower.contains("hindi") ->
+                "Arre waah! Yeh bilkul clear aur natural lag raha hai. Aap bina kisi hesitation ke send kar sakte ho. All the best!"
             else ->
-                "Here is the generated text based on your prompt:\n\"$prompt\"\n\nEverything has been formatted and reviewed for clarity and impact."
+                "Here is the generated output based on your request:\n\n\"$trimmed\"\n\nEverything has been reviewed, polished, and formatted for maximum clarity."
         }
         Result.success(response)
     }

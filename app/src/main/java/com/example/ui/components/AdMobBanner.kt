@@ -37,8 +37,14 @@ import com.google.android.gms.ads.LoadAdError
 fun RealAdMobBanner(
     modifier: Modifier = Modifier,
     isDarkMode: Boolean = false,
+    isPremium: Boolean = false,
     adUnitId: String = AdMobConfig.DASHBOARD_BANNER_AD_UNIT_ID
 ) {
+    if (isPremium) {
+        // AdMob Policy & VIP Guarantee: Never display ads to paid subscribers
+        return
+    }
+
     val context = LocalContext.current
     var isAdLoaded by remember { mutableStateOf(false) }
     var adErrorMessage by remember { mutableStateOf<String?>(null) }

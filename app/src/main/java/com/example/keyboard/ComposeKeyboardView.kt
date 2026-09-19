@@ -7,6 +7,9 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,12 +36,17 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -55,6 +63,12 @@ import com.example.data.LingoKeyPreferences
 import com.example.engine.*
 import com.example.model.*
 import kotlinx.coroutines.launch
+
+data class AutoCorrectionRevertRecord(
+    val originalTyped: String,
+    val correctedWord: String,
+    val committedLength: Int
+)
 
 @Composable
 fun ComposeKeyboardView(
@@ -110,6 +124,7 @@ fun ComposeKeyboardView(
     val keyPreviewEnabled by preferences.keyPreviewEnabled.collectAsState()
     val toolbarItems by preferences.toolbarItems.collectAsState()
     val latestClip by clipboardRepository.latestClip.collectAsState()
+    val isPremiumUser by preferences.isPremiumUser.collectAsState()
 
     var keyboardMode by remember { mutableStateOf(KeyboardMode.ALPHABET) }
     var isShifted by remember { mutableStateOf(false) }
@@ -117,6 +132,10 @@ fun ComposeKeyboardView(
     var currentComposingWord by remember { mutableStateOf("") }
     var lastCommittedWord by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf(listOf("I", "Hello", "How", "Thank you")) }
+    var currentCandidateStrip by remember {
+        mutableStateOf(SuggestionEngine.getCandidateStrip("", "", "en"))
+    }
+    var lastAutoCorrection by remember { mutableStateOf<AutoCorrectionRevertRecord?>(null) }
 
     // Quick Language Selector Sheet State
     var showLanguagePickerSheet by remember { mutableStateOf(false) }
@@ -167,36 +186,57 @@ fun ComposeKeyboardView(
         }
     }
 
-    // Refresh suggestions including phonetic transliteration & contextual emojis
+    var suggestionJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val isTyping by remember { derivedStateOf { currentComposingWord.isNotEmpty() } }
+
+    // Refresh suggestions asynchronously on Dispatchers.Default (Zero-Latency Typing)
     fun refreshSuggestions(composingWord: String) {
+        suggestionJob?.cancel()
+        if (composingWord.isEmpty()) {
+            currentCandidateStrip = SuggestionEngine.getCandidateStrip("", "", activeLanguage.code)
+            suggestions = listOf("I", "Hello", "How", "Thank you")
+            return
+        }
+
         val context = onGetContextText().ifEmpty { lastCommittedWord }
-        val base = SuggestionEngine.getSuggestions(composingWord, context, activeLanguage.code)
+        val langCode = activeLanguage.code
+        val isTranslit = transliterationEnabled
+        val isEmoji = emojiSuggestionsEnabled
 
-        val translitCandidates = if (transliterationEnabled && composingWord.isNotBlank()) {
-            TransliteratorEngine.getTransliterationCandidates(composingWord, activeLanguage.code)
-        } else emptyList()
+        suggestionJob = coroutineScope.launch(Dispatchers.Default) {
+            val strip = SuggestionEngine.getCandidateStrip(composingWord, context, langCode)
+            val base = SuggestionEngine.getSuggestions(composingWord, context, langCode)
 
-        val emojiCandidates = if (emojiSuggestionsEnabled && composingWord.isNotBlank()) {
-            EmojiSuggestionEngine.getMatchingEmojis(composingWord)
-        } else emptyList()
+            val translitCandidates = if (isTranslit && composingWord.isNotBlank()) {
+                TransliteratorEngine.getTransliterationCandidates(composingWord, langCode)
+            } else emptyList()
 
-        val combined = mutableListOf<String>()
-        if (translitCandidates.isNotEmpty()) {
-            combined.addAll(translitCandidates)
-        }
-        for (s in base) {
-            if (!combined.contains(s)) {
-                combined.add(s)
+            val emojiCandidates = if (isEmoji && composingWord.isNotBlank()) {
+                EmojiSuggestionEngine.getMatchingEmojis(composingWord)
+            } else emptyList()
+
+            val combined = mutableListOf<String>()
+            if (translitCandidates.isNotEmpty()) {
+                combined.addAll(translitCandidates)
             }
-        }
-        if (emojiCandidates.isNotEmpty()) {
-            for (e in emojiCandidates.take(2)) {
-                if (!combined.contains(e)) {
-                    combined.add(e)
+            for (s in base) {
+                if (!combined.contains(s)) {
+                    combined.add(s)
                 }
             }
+            if (emojiCandidates.isNotEmpty()) {
+                for (e in emojiCandidates.take(2)) {
+                    if (!combined.contains(e)) {
+                        combined.add(e)
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                currentCandidateStrip = strip
+                suggestions = combined
+            }
         }
-        suggestions = combined
     }
 
     // Update suggestions when active language or preferences change
@@ -226,8 +266,10 @@ fun ComposeKeyboardView(
 
     fun handleKeyPress(char: String) {
         vibrate()
+        lastAutoCorrection = null
         val textToCommit = char
 
+        // INSTANT COMMIT TO INPUT CONNECTION (<1ms on UI thread)
         onCommitText(textToCommit)
         if (isShifted && !isCapsLock) {
             isShifted = false
@@ -238,11 +280,17 @@ fun ComposeKeyboardView(
             val finishedWord = currentComposingWord.trim()
             if (finishedWord.isNotEmpty()) {
                 lastCommittedWord = finishedWord
-                SuggestionEngine.learnWord(finishedWord)
+                coroutineScope.launch(Dispatchers.Default) {
+                    SuggestionEngine.learnWord(finishedWord)
+                }
                 if (autoDetectLanguage && finishedWord.length >= 2) {
-                    val detected = LanguageDetector.detectLanguage(finishedWord)
-                    if (detected.id != activeLanguage.id) {
-                        preferences.setActiveLanguage(detected)
+                    coroutineScope.launch(Dispatchers.Default) {
+                        val detected = LanguageDetector.detectLanguage(finishedWord)
+                        if (detected.id != activeLanguage.id) {
+                            withContext(Dispatchers.Main) {
+                                preferences.setActiveLanguage(detected)
+                            }
+                        }
                     }
                 }
 
@@ -259,16 +307,21 @@ fun ComposeKeyboardView(
             refreshSuggestions("")
         } else if (char != " ") {
             currentComposingWord += textToCommit
-            // Prefetch translation in background while user types so Space is instant!
+            // Prefetch translation in background while user types
             if (realtimeAutoTranslate && currentComposingWord.isNotBlank()) {
-                GoogleTranslationEngine.prefetch(currentComposingWord, activeLanguage.code, targetTranslateLang.code)
+                coroutineScope.launch(Dispatchers.Default) {
+                    GoogleTranslationEngine.prefetch(currentComposingWord, activeLanguage.code, targetTranslateLang.code)
+                }
             }
-            // Auto-detect language dynamically while typing
+            // Auto-detect language dynamically while typing on background dispatcher
             if (autoDetectLanguage && currentComposingWord.length >= 3) {
-                val detected = LanguageDetector.detectLanguage(currentComposingWord)
-                if (detected.id != activeLanguage.id && detected.layoutType == activeLanguage.layoutType) {
-                    // Update active language seamlessly
-                    preferences.setActiveLanguage(detected)
+                coroutineScope.launch(Dispatchers.Default) {
+                    val detected = LanguageDetector.detectLanguage(currentComposingWord)
+                    if (detected.id != activeLanguage.id && detected.layoutType == activeLanguage.layoutType) {
+                        withContext(Dispatchers.Main) {
+                            preferences.setActiveLanguage(detected)
+                        }
+                    }
                 }
             }
             refreshSuggestions(currentComposingWord)
@@ -277,6 +330,17 @@ fun ComposeKeyboardView(
 
     fun handleBackspace() {
         vibrate()
+        if (lastAutoCorrection != null) {
+            // Gboard-grade Backspace Revert: revert autocorrection back to user's literal typed input
+            val revert = lastAutoCorrection!!
+            lastAutoCorrection = null
+            onDeleteSurroundingText(revert.committedLength, 0)
+            onCommitText(revert.originalTyped)
+            currentComposingWord = revert.originalTyped
+            refreshSuggestions(currentComposingWord)
+            return
+        }
+
         onDeleteSurroundingText(1, 0)
         if (currentComposingWord.isNotEmpty()) {
             currentComposingWord = currentComposingWord.dropLast(1)
@@ -288,6 +352,7 @@ fun ComposeKeyboardView(
 
     fun handleDeleteWord() {
         vibrate()
+        lastAutoCorrection = null
         val contextBefore = onGetContextText()
         if (contextBefore.isNotEmpty()) {
             val trimmed = contextBefore.trimEnd()
@@ -306,11 +371,15 @@ fun ComposeKeyboardView(
         vibrate()
         var wordToProcess = currentComposingWord.trim()
 
-        // 1. Auto-detection on space
+        // 1. Auto-detection on space offloaded to background
         if (autoDetectLanguage && wordToProcess.length >= 2) {
-            val detected = LanguageDetector.detectLanguage(wordToProcess)
-            if (detected.id != activeLanguage.id) {
-                preferences.setActiveLanguage(detected)
+            coroutineScope.launch(Dispatchers.Default) {
+                val detected = LanguageDetector.detectLanguage(wordToProcess)
+                if (detected.id != activeLanguage.id) {
+                    withContext(Dispatchers.Main) {
+                        preferences.setActiveLanguage(detected)
+                    }
+                }
             }
         }
 
@@ -322,17 +391,34 @@ fun ComposeKeyboardView(
                 onDeleteSurroundingText(currentComposingWord.length, 0)
                 onCommitText(transliterated)
                 wordToProcess = transliterated
+                lastAutoCorrection = null
             }
-        }
-
-        // 3. Auto-correction
-        if (autoCorrection && wordToProcess.isNotEmpty()) {
-            val corrected = SuggestionEngine.getAutoCorrection(wordToProcess, activeLanguage.code)
-            if (corrected != null && corrected != wordToProcess) {
+        } else if (autoCorrection && wordToProcess.isNotEmpty()) {
+            // 3. Spacebar Auto-Commit (Gboard-grade zero-latency auto-correction)
+            val candidate = currentCandidateStrip
+            if (candidate.isAutoCorrection && candidate.primary.isNotBlank() && !candidate.primary.equals(wordToProcess, ignoreCase = true)) {
+                val corrected = candidate.primary
                 onDeleteSurroundingText(currentComposingWord.length, 0)
-                onCommitText(corrected)
-                wordToProcess = corrected
+                onCommitText("$corrected ")
+                // Save state for Gboard-grade Backspace Revert!
+                lastAutoCorrection = AutoCorrectionRevertRecord(
+                    originalTyped = currentComposingWord,
+                    correctedWord = corrected,
+                    committedLength = corrected.length + 1
+                )
+                triggerWordTTS(corrected, isTranslated = realtimeAutoTranslate)
+                lastCommittedWord = corrected
+                coroutineScope.launch(Dispatchers.Default) {
+                    SuggestionEngine.learnWord(corrected)
+                }
+                currentComposingWord = ""
+                refreshSuggestions("")
+                return
+            } else {
+                lastAutoCorrection = null
             }
+        } else {
+            lastAutoCorrection = null
         }
 
         // 4. Realtime auto translate check
@@ -386,104 +472,199 @@ fun ComposeKeyboardView(
             .navigationBarsPadding()
             .padding(bottom = 6.dp)
     ) {
-        // TOP SMART TOOLBAR
-        SmartToolbar(
+        // ACTIVE TOOL STATE (Determines which 3D Neumorphic chip is glowing and handles 1st-click open / 2nd-click close)
+        val activeToolId = when (keyboardMode) {
+            KeyboardMode.TOOLS_PANEL -> "tools"
+            KeyboardMode.AI_PANEL -> "ai"
+            KeyboardMode.TRANSLATE_PANEL -> "translate"
+            KeyboardMode.VOICE_PANEL -> "voice"
+            KeyboardMode.CLIPBOARD -> "clipboard"
+            KeyboardMode.SMART_REPLY_PANEL -> "smart_reply"
+            KeyboardMode.EMOJI -> if (emojiPanelInitialTab == "STICKER") "stickers" else "emoji"
+            KeyboardMode.LANGUAGE_PANEL -> "languages"
+            KeyboardMode.NUMERIC_PAD -> "numpad"
+            KeyboardMode.TOOLBAR_CUSTOMIZE -> "customize"
+            else -> null
+        }
+
+        // UNIFIED 3D NEUMORPHIC TOOLBAR & GBOARD CANDIDATE STRIP
+        UnifiedGboardTopStrip(
             theme = currentTheme,
+            isTyping = isTyping,
+            candidateResult = currentCandidateStrip,
+            currentComposingWord = currentComposingWord,
             activeLanguage = activeLanguage,
-            voiceGender = voiceGender,
-            realtimeTTSMode = realtimeTTSMode,
+            targetLang = targetTranslateLang,
             realtimeAutoTranslate = realtimeAutoTranslate,
-            targetTranslateLang = targetTranslateLang,
-            autoDetectLanguage = autoDetectLanguage,
-            transliterationEnabled = transliterationEnabled,
-            onToggleTransliteration = {
-                val nextState = !transliterationEnabled
-                preferences.setTransliterationEnabled(nextState)
-            },
-            showNumberRow = showNumberRow,
-            onToggleNumberRow = {
-                preferences.setShowNumberRow(!showNumberRow)
-            },
-            keyHeightDp = keyHeightDp,
-            onCycleHeight = {
-                val next = when (keyHeightDp) {
-                    42 -> 46
-                    46 -> 50
-                    50 -> 56
-                    56 -> 60
-                    else -> 42
+            toolbarItems = toolbarItems,
+            latestClip = latestClip,
+            activeToolId = activeToolId,
+            onToggleLeftGrid = {
+                vibrate()
+                if (keyboardMode != KeyboardMode.ALPHABET) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.TOOLS_PANEL
                 }
-                preferences.setKeyHeightDp(next)
             },
-            onOpenLanguagePicker = {
-                keyboardMode = if (keyboardMode == KeyboardMode.LANGUAGE_PANEL) KeyboardMode.ALPHABET else KeyboardMode.LANGUAGE_PANEL
+            onPasteClip = { clip ->
+                vibrate()
+                lastAutoCorrection = null
+                onCommitText(clip)
+                clipboardRepository.dismissLatestClip()
             },
-            onOpenAI = { keyboardMode = KeyboardMode.AI_PANEL; aiActionState = AIState.Idle },
+            onCommitCandidate = { word, isDirectTranslation, isLiteral ->
+                vibrate()
+                if (currentComposingWord.isNotEmpty()) {
+                    onDeleteSurroundingText(currentComposingWord.length, 0)
+                }
+                val isEmoji = word.length <= 2 && !word.first().isLetterOrDigit()
+                val textToInsert = if (isDirectTranslation) {
+                    word
+                } else if (realtimeAutoTranslate && !isEmoji) {
+                    GoogleTranslationEngine.translateFast(word, activeLanguage.code, targetTranslateLang.code)
+                } else {
+                    word
+                }
+                val suffix = if (isEmoji) "" else " "
+                onCommitText("$textToInsert$suffix")
+                if (!isEmoji) {
+                    if (!isLiteral && currentCandidateStrip.isAutoCorrection && word == currentCandidateStrip.primary) {
+                        lastAutoCorrection = AutoCorrectionRevertRecord(
+                            originalTyped = currentComposingWord,
+                            correctedWord = textToInsert,
+                            committedLength = textToInsert.length + suffix.length
+                        )
+                    } else {
+                        lastAutoCorrection = null
+                    }
+                    triggerWordTTS(textToInsert, isTranslated = isDirectTranslation || realtimeAutoTranslate)
+                    lastCommittedWord = textToInsert
+                    coroutineScope.launch(Dispatchers.Default) {
+                        SuggestionEngine.learnWord(textToInsert)
+                    }
+                } else {
+                    lastAutoCorrection = null
+                }
+                currentComposingWord = ""
+                refreshSuggestions("")
+            },
+            onOpenEmoji = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.EMOJI && emojiPanelInitialTab == "EMOJI") {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    emojiPanelInitialTab = "EMOJI"
+                    keyboardMode = KeyboardMode.EMOJI
+                }
+            },
+            onOpenTools = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.TOOLS_PANEL) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.TOOLS_PANEL
+                }
+            },
+            onOpenAI = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.AI_PANEL) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.AI_PANEL
+                    aiActionState = AIState.Idle
+                }
+            },
             onOpenTranslate = {
-                keyboardMode = KeyboardMode.TRANSLATE_PANEL
-                translateSourceText = onGetContextText()
-                if (translateSourceText.isNotBlank()) {
-                    translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, activeLanguage.code, targetTranslateLang.code)
-                    coroutineScope.launch {
-                        isTranslating = true
-                        val online = GoogleTranslationEngine.translate(translateSourceText, activeLanguage.code, targetTranslateLang.code)
-                        translateResultText = online
-                        isTranslating = false
+                vibrate()
+                if (keyboardMode == KeyboardMode.TRANSLATE_PANEL) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.TRANSLATE_PANEL
+                    translateSourceText = onGetContextText()
+                    if (translateSourceText.isNotBlank()) {
+                        translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, activeLanguage.code, targetTranslateLang.code)
+                        coroutineScope.launch {
+                            isTranslating = true
+                            val online = GoogleTranslationEngine.translate(translateSourceText, activeLanguage.code, targetTranslateLang.code)
+                            translateResultText = online
+                            isTranslating = false
+                        }
                     }
                 }
             },
             onOpenVoice = {
-                keyboardMode = KeyboardMode.VOICE_PANEL
-                voiceRecognizedText = ""
-                voiceErrorMessage = null
-                onStartSpeechRecognition?.invoke()
-            },
-            onToggleVoiceGender = {
-                val allGenders = VoiceGender.values()
-                val nextIndex = (allGenders.indexOf(voiceGender) + 1) % allGenders.size
-                val nextGender = allGenders[nextIndex]
-                preferences.setVoiceGender(nextGender)
-                voiceTTSEngine.setVoiceGender(nextGender)
-                voiceTTSEngine.speak("Switched to ${nextGender.displayName}", activeLanguage.ttsLocaleTag)
-            },
-            onToggleRealtimeTTS = {
-                val nextMode = if (realtimeTTSMode == RealtimeTTSMode.OFF) RealtimeTTSMode.WORD_BY_WORD else RealtimeTTSMode.OFF
-                preferences.setRealtimeTTSMode(nextMode)
-                if (nextMode != RealtimeTTSMode.OFF) {
-                    voiceTTSEngine.speak("Live voice output enabled", activeLanguage.ttsLocaleTag)
+                vibrate()
+                if (keyboardMode == KeyboardMode.VOICE_PANEL) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.VOICE_PANEL
+                    voiceRecognizedText = ""
+                    voiceErrorMessage = null
+                    onStartSpeechRecognition?.invoke()
                 }
-            },
-            onToggleRealtimeTranslate = {
-                val nextState = !realtimeAutoTranslate
-                preferences.setRealtimeAutoTranslate(nextState)
-                if (nextState && realtimeTTSMode != RealtimeTTSMode.OFF) {
-                    voiceTTSEngine.speak("Realtime auto translation enabled to ${targetTranslateLang.displayName}", targetTranslateLang.ttsLocaleTag)
-                }
-            },
-            onOpenClipboard = { keyboardMode = KeyboardMode.CLIPBOARD },
-            onOpenStickers = {
-                emojiPanelInitialTab = "TEMPLATES"
-                keyboardMode = KeyboardMode.EMOJI
-            },
-            onOpenEmoji = {
-                emojiPanelInitialTab = "EMOJI"
-                keyboardMode = KeyboardMode.EMOJI
             },
             onOpenSettings = onOpenSettings,
-            onOpenTools = { keyboardMode = KeyboardMode.TOOLS_PANEL },
-            onOpenSmartReply = { keyboardMode = KeyboardMode.SMART_REPLY_PANEL },
+            onOpenClipboard = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.CLIPBOARD) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.CLIPBOARD
+                }
+            },
+            onOpenSmartReply = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.SMART_REPLY_PANEL) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.SMART_REPLY_PANEL
+                }
+            },
+            onOpenTemplates = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.EMOJI && emojiPanelInitialTab == "STICKER") {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    emojiPanelInitialTab = "STICKER"
+                    keyboardMode = KeyboardMode.EMOJI
+                }
+            },
             onOpenThemes = { onOpenThemesStore() },
-            onOpenLanguages = { keyboardMode = KeyboardMode.LANGUAGE_PANEL },
-            toolbarItems = toolbarItems,
-            onOpenCustomizeToolbar = { keyboardMode = KeyboardMode.TOOLBAR_CUSTOMIZE }
+            onOpenLanguages = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.LANGUAGE_PANEL) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.LANGUAGE_PANEL
+                }
+            },
+            onOpenToolbarCustomize = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.TOOLBAR_CUSTOMIZE) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.TOOLBAR_CUSTOMIZE
+                }
+            },
+            onOpenNumericPad = {
+                vibrate()
+                if (keyboardMode == KeyboardMode.NUMERIC_PAD) {
+                    keyboardMode = KeyboardMode.ALPHABET
+                } else {
+                    keyboardMode = KeyboardMode.NUMERIC_PAD
+                }
+            }
         )
 
-        // DYNAMIC KEYBOARD PANEL HEIGHT (Strictly synchronized with keyHeightDp to prevent panel reduction)
-        val standardPanelHeight = remember(keyHeightDp, showNumberRow, showSuggestions) {
-            var h = (keyHeightDp * 4).dp + 16.dp
-            if (showSuggestions) h += 40.dp
-            if (showNumberRow) h += ((keyHeightDp * 0.78f).coerceAtLeast(36f)).dp + 4.dp
-            h.coerceAtLeast(265.dp)
+        // DYNAMIC KEYBOARD PANEL HEIGHT (Driven by user preference keyHeightDp, default 45dp row height + natural spacing)
+        val currentKeyHeight = remember(keyHeightDp) {
+            keyHeightDp.dp.coerceIn(38.dp, 68.dp)
+        }
+        val standardPanelHeight = remember(currentKeyHeight, showNumberRow) {
+            var h = (currentKeyHeight * 4) + 22.dp
+            if (showNumberRow) h += (currentKeyHeight * 0.88f).coerceAtLeast(36.dp)
+            h.coerceAtLeast(240.dp)
         }
 
         // CONTENT AREA (Panels OR Main Keyboard)
@@ -524,6 +705,7 @@ fun ComposeKeyboardView(
                         onOpenLanguages = { keyboardMode = KeyboardMode.LANGUAGE_PANEL },
                         onOpenSettings = onOpenSettings,
                         onOpenCustomizeToolbar = { keyboardMode = KeyboardMode.TOOLBAR_CUSTOMIZE },
+                        onOpenNumericPad = { keyboardMode = KeyboardMode.NUMERIC_PAD },
                         onClose = { keyboardMode = KeyboardMode.ALPHABET },
                         panelHeight = standardPanelHeight
                     )
@@ -804,53 +986,35 @@ fun ComposeKeyboardView(
                     )
                 }
 
+                KeyboardMode.NUMERIC_PAD -> {
+                    DedicatedNumericPad(
+                        theme = currentTheme,
+                        panelHeight = standardPanelHeight,
+                        editorInfo = currentEditorInfo,
+                        onKeyPress = { key -> handleKeyPress(key) },
+                        onDelete = { handleBackspace() },
+                        onDeleteWord = { handleDeleteWord() },
+                        onSpace = { handleSpace() },
+                        onEnter = {
+                            vibrate()
+                            lastAutoCorrection = null
+                            val finishedWord = currentComposingWord.trim()
+                            if (finishedWord.isNotEmpty()) {
+                                triggerWordTTS(finishedWord, isTranslated = realtimeAutoTranslate)
+                                currentComposingWord = ""
+                            }
+                            onPerformEditorAction()
+                        },
+                        onSwitchMode = { newMode ->
+                            vibrate()
+                            keyboardMode = newMode
+                        }
+                    )
+                }
+
                 else -> {
                     // MAIN TYPING KEYBOARD (ALPHABET / NUMBERS / SYMBOLS)
                     Column {
-                        // SUGGESTION ROW
-                        if (showSuggestions) {
-                            SuggestionBar(
-                                suggestions = suggestions,
-                                currentComposingWord = currentComposingWord,
-                                activeLanguage = activeLanguage,
-                                targetLang = targetTranslateLang,
-                                realtimeAutoTranslate = realtimeAutoTranslate,
-                                theme = currentTheme,
-                                latestClip = latestClip,
-                                onPasteClip = { clip ->
-                                    vibrate()
-                                    onCommitText(clip)
-                                    clipboardRepository.dismissLatestClip()
-                                },
-                                onSuggestionClick = { word, isDirectTranslation ->
-                                    vibrate()
-                                    if (currentComposingWord.isNotEmpty()) {
-                                        onDeleteSurroundingText(currentComposingWord.length, 0)
-                                    }
-                                    val isEmoji = word.length <= 2 && !word.first().isLetterOrDigit()
-                                    val textToInsert = if (isDirectTranslation) {
-                                        word
-                                    } else if (realtimeAutoTranslate && !isEmoji) {
-                                        GoogleTranslationEngine.translateFast(word, activeLanguage.code, targetTranslateLang.code)
-                                    } else {
-                                        word
-                                    }
-                                    val suffix = if (isEmoji) "" else " "
-                                    onCommitText("$textToInsert$suffix")
-                                    if (!isEmoji) {
-                                        triggerWordTTS(textToInsert, isTranslated = isDirectTranslation || realtimeAutoTranslate)
-                                        lastCommittedWord = textToInsert
-                                        SuggestionEngine.learnWord(textToInsert)
-                                    }
-                                    currentComposingWord = ""
-                                    refreshSuggestions("")
-                                }
-                            )
-                        }
-
-                        // Dynamic key height according to user ergonomics preference
-                        val currentKeyHeight = keyHeightDp.dp
-
                         // QUICK MATRAS / VELANTI / VOWEL SIGNS BAR (Bengali, Hindi, Marathi, Gujarati, Tamil, Telugu, etc.)
                         val quickMatras = KeyboardLayouts.getQuickMatrasForLayout(activeLanguage.layoutType)
                         if (keyboardMode == KeyboardMode.ALPHABET && quickMatras != null) {
@@ -897,28 +1061,30 @@ fun ComposeKeyboardView(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 2.dp, vertical = 1.dp),
+                                    .padding(horizontal = 1.dp, vertical = 0.5.dp),
                                 horizontalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
                                 for (keyChar in topRowKeys) {
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                                            .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
                                     ) {
                                         ThemedKeyBox(
                                             theme = currentTheme,
                                             modifier = Modifier.fillMaxWidth(),
                                             isSpecial = false,
                                             isSelected = false,
-                                            height = (currentKeyHeight * 0.78f).coerceAtLeast(36.dp),
+                                            height = (currentKeyHeight * 0.88f).coerceAtLeast(39.dp),
                                             onClick = { handleKeyPress(keyChar) }
                                         ) {
                                             Text(
                                                 text = keyChar,
                                                 color = currentTheme.textColor,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Medium
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.align(Alignment.Center)
                                             )
                                         }
                                     }
@@ -937,7 +1103,7 @@ fun ComposeKeyboardView(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 2.dp, vertical = 1.dp),
+                                    .padding(horizontal = 1.dp, vertical = 0.5.dp),
                                 horizontalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
                                 val isLastRow = (rowIndex == rows.size - 1)
@@ -952,8 +1118,9 @@ fun ComposeKeyboardView(
                                 }
 
                                 // Left modifier on last row (Shift for alphabet, = / < for symbols)
+                                // Calibrated to 1.5f weight (matching Gboard 7 alphabet keys + 1.5f shift + 1.5f backspace = 10.0f)
                                 if (isLastRow) {
-                                    val modWeight = ((10f - rowKeys.size) / 2f).coerceIn(1.3f, 1.55f)
+                                    val modWeight = if (rowKeys.size == 7) 1.5f else ((10f - rowKeys.size) / 2f).coerceIn(1.3f, 1.55f)
                                     when (keyboardMode) {
                                         KeyboardMode.ALPHABET -> {
                                             KeySpecialButton(
@@ -1027,7 +1194,7 @@ fun ComposeKeyboardView(
 
                                 // Right modifier on last row (Backspace with accelerating hold-to-delete & swipe-to-delete-word)
                                 if (isLastRow) {
-                                    val modWeight = ((10f - rowKeys.size) / 2f).coerceIn(1.3f, 1.55f)
+                                    val modWeight = if (rowKeys.size == 7) 1.5f else ((10f - rowKeys.size) / 2f).coerceIn(1.3f, 1.55f)
                                     KeyBackspaceButton(
                                         modifier = Modifier.weight(modWeight),
                                         theme = currentTheme,
@@ -1047,7 +1214,7 @@ fun ComposeKeyboardView(
                             }
                         }
 
-                        // BOTTOM ACTION ROW (Clean Gboard Layout with Cursor Scrubbing & Language Switch)
+                        // BOTTOM ACTION ROW (Clean Gboard Layout: Spacebar 50% width, flanked symmetrically by ?123, comma, period, enter)
                         BottomActionRow(
                             theme = currentTheme,
                             keyboardMode = keyboardMode,
@@ -1056,10 +1223,29 @@ fun ComposeKeyboardView(
                             height = currentKeyHeight,
                             isTransliterationActive = transliterationEnabled,
                             editorInfo = currentEditorInfo,
-                            onMoveCursor = onMoveCursor,
+                            onMoveCursor = { offset ->
+                                lastAutoCorrection = null
+                                onMoveCursor(offset)
+                            },
                             onSwitchMode = { newMode ->
                                 vibrate()
+                                lastAutoCorrection = null
                                 keyboardMode = newMode
+                            },
+                            onComma = {
+                                vibrate()
+                                lastAutoCorrection = null
+                                handleKeyPress(",")
+                            },
+                            onPeriod = {
+                                vibrate()
+                                lastAutoCorrection = null
+                                handleKeyPress(".")
+                            },
+                            onInsertSymbol = { symbol ->
+                                vibrate()
+                                lastAutoCorrection = null
+                                handleKeyPress(symbol)
                             },
                             onSwitchLanguage = {
                                 vibrate()
@@ -1076,6 +1262,7 @@ fun ComposeKeyboardView(
                             },
                             onEnter = {
                                 vibrate()
+                                lastAutoCorrection = null
                                 val finishedWord = currentComposingWord.trim()
                                 if (finishedWord.isNotEmpty()) {
                                     triggerWordTTS(finishedWord, isTranslated = realtimeAutoTranslate)
@@ -1343,7 +1530,7 @@ fun SmartToolbar(
 
 @Composable
 fun SuggestionBar(
-    suggestions: List<String>,
+    candidateResult: com.example.engine.CandidateStripResult,
     currentComposingWord: String,
     activeLanguage: Language,
     targetLang: Language,
@@ -1351,7 +1538,7 @@ fun SuggestionBar(
     theme: KeyboardTheme,
     latestClip: String? = null,
     onPasteClip: (String) -> Unit = {},
-    onSuggestionClick: (String, Boolean) -> Unit
+    onCommitCandidate: (word: String, isDirectTranslation: Boolean, isLiteral: Boolean) -> Unit
 ) {
     var liveTrans by remember(currentComposingWord, activeLanguage.code, targetLang.code) {
         mutableStateOf<String?>(
@@ -1376,24 +1563,27 @@ fun SuggestionBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(theme.surfaceColor.copy(alpha = 0.75f))
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .height(44.dp)
+            .background(theme.surfaceColor.copy(alpha = 0.85f))
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. SMART PASTE SUGGESTION PILL (Gboard Style)
         val hasSmartPaste = currentComposingWord.isBlank() && !latestClip.isNullOrBlank()
+
         if (hasSmartPaste && latestClip != null) {
+            // Smart Paste chip takes left slot
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = theme.primaryColor.copy(alpha = 0.16f),
                 border = BorderStroke(1.dp, theme.primaryColor.copy(alpha = 0.55f)),
                 modifier = Modifier
-                    .weight(1.8f)
+                    .weight(1.5f)
+                    .fillMaxHeight()
                     .clickable { onPasteClip(latestClip) }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
@@ -1401,7 +1591,7 @@ fun SuggestionBar(
                         Icons.Default.ContentPaste,
                         contentDescription = "Paste",
                         tint = theme.primaryColor,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = latestClip.replace("\n", " ").trim(),
@@ -1420,92 +1610,1007 @@ fun SuggestionBar(
                     )
                 }
             }
-        }
 
-        // 2. Live Translation Highlight Candidate Chip
-        val currentTrans = liveTrans
-        if (currentTrans != null) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF6366F1),
-                border = BorderStroke(1.dp, Color(0xFF818CF8)),
-                modifier = Modifier
-                    .weight(1.3f)
-                    .clickable { onSuggestionClick(currentTrans, true) }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "✨ $liveTrans",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = targetLang.code.uppercase(),
-                        color = Color(0xFFE0E7FF),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-
-        // 3. Regular Suggestions
-        val rawSuggestions = if (suggestions.isEmpty()) {
-            listOf("I", "How", "Thank you")
-        } else {
-            suggestions
-        }
-        val displaySuggestions = when {
-            hasSmartPaste && liveTrans != null -> rawSuggestions.take(1)
-            hasSmartPaste || liveTrans != null -> rawSuggestions.take(2)
-            else -> rawSuggestions.take(4)
-        }
-        displaySuggestions.forEachIndexed { index, suggestion ->
-            val isPrimary = if (displaySuggestions.size >= 3) index == 1 else index == 0
+            // Center slot (Primary next word)
+            val primaryText = candidateResult.primary.ifEmpty { "the" }
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(1.2f)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (isPrimary) theme.primaryColor.copy(alpha = 0.16f)
-                        else theme.keyColor.copy(alpha = 0.5f)
-                    )
-                    .border(
-                        width = if (isPrimary) 1.dp else 0.dp,
-                        color = if (isPrimary) theme.primaryColor.copy(alpha = 0.35f) else Color.Transparent,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .clickable { onSuggestionClick(suggestion, false) }
-                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                    .background(theme.primaryColor.copy(alpha = 0.12f))
+                    .border(1.dp, theme.primaryColor.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .clickable { onCommitCandidate(primaryText, false, false) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = suggestion,
-                    color = if (isPrimary) theme.textColor else theme.textColor.copy(alpha = 0.85f),
-                    fontSize = if (isPrimary) 13.5.sp else 13.sp,
-                    fontWeight = if (isPrimary) FontWeight.Bold else FontWeight.Medium,
+                    text = primaryText,
+                    color = theme.textColor,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            if (index < displaySuggestions.lastIndex) {
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(18.dp)
-                        .background(theme.textSecondaryColor.copy(alpha = 0.25f))
+            // Right slot (Alternative next word)
+            val altText = candidateResult.alternative.ifEmpty { "to" }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(theme.keyColor.copy(alpha = 0.45f))
+                    .clickable { onCommitCandidate(altText, false, false) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = altText,
+                    color = theme.textColor.copy(alpha = 0.85f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+        } else {
+            // STANDARD GBOARD 3-SLOT CANDIDATE STRIP
+            // 1. LEFT SLOT: Literal typed text (italicized in quotes so user can easily preserve exact input)
+            val literalText = candidateResult.literal.ifEmpty { currentComposingWord.ifEmpty { "I" } }
+            Box(
+                modifier = Modifier
+                    .weight(1.0f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(theme.keyColor.copy(alpha = 0.45f))
+                    .clickable { onCommitCandidate(literalText, false, true) }
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (currentComposingWord.isNotEmpty()) "“$literalText”" else literalText,
+                    color = theme.textColor.copy(alpha = 0.88f),
+                    fontSize = 13.sp,
+                    fontStyle = if (currentComposingWord.isNotEmpty()) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Divider 1
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(20.dp)
+                    .background(theme.textSecondaryColor.copy(alpha = 0.22f))
+            )
+
+            // 2. CENTER SLOT: Primary Auto-Correction / High-Probability Prediction
+            val primaryText = candidateResult.primary.ifEmpty { currentComposingWord.ifEmpty { "Hello" } }
+            val isAutoCorrection = candidateResult.isAutoCorrection
+            Box(
+                modifier = Modifier
+                    .weight(1.35f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (isAutoCorrection) theme.primaryColor.copy(alpha = 0.22f)
+                        else theme.primaryColor.copy(alpha = 0.12f)
+                    )
+                    .border(
+                        width = if (isAutoCorrection) 1.2.dp else 1.dp,
+                        color = if (isAutoCorrection) theme.primaryColor.copy(alpha = 0.65f) else theme.primaryColor.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onCommitCandidate(primaryText, false, false) }
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = primaryText,
+                        color = theme.textColor,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (isAutoCorrection) {
+                        Box(
+                            modifier = Modifier
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(theme.primaryColor)
+                        )
+                    }
+                }
+            }
+
+            // Divider 2
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(20.dp)
+                    .background(theme.textSecondaryColor.copy(alpha = 0.22f))
+            )
+
+            // 3. RIGHT SLOT: Alternative Candidate OR Live Translation
+            val currentTrans = liveTrans
+            if (currentTrans != null && currentComposingWord.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF6366F1),
+                    border = BorderStroke(1.dp, Color(0xFF818CF8)),
+                    modifier = Modifier
+                        .weight(1.05f)
+                        .fillMaxHeight()
+                        .clickable { onCommitCandidate(currentTrans, true, false) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "✨ $currentTrans",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            } else {
+                val altText = candidateResult.alternative.ifEmpty { if (currentComposingWord.isEmpty()) "Thanks" else "" }
+                Box(
+                    modifier = Modifier
+                        .weight(1.0f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (altText.isNotEmpty()) theme.keyColor.copy(alpha = 0.45f)
+                            else Color.Transparent
+                        )
+                        .clickable(enabled = altText.isNotEmpty()) { onCommitCandidate(altText, false, false) }
+                        .padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (altText.isNotEmpty()) {
+                        Text(
+                            text = altText,
+                            color = theme.textColor.copy(alpha = 0.85f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+fun UnifiedGboardTopStrip(
+    theme: KeyboardTheme,
+    isTyping: Boolean,
+    candidateResult: com.example.engine.CandidateStripResult,
+    currentComposingWord: String,
+    activeLanguage: Language,
+    targetLang: Language,
+    realtimeAutoTranslate: Boolean,
+    toolbarItems: List<String>,
+    latestClip: String? = null,
+    activeToolId: String? = null,
+    onToggleLeftGrid: () -> Unit = {},
+    onPasteClip: (String) -> Unit = {},
+    onCommitCandidate: (word: String, isDirectTranslation: Boolean, isLiteral: Boolean) -> Unit,
+    onOpenEmoji: () -> Unit,
+    onOpenTools: () -> Unit,
+    onOpenAI: () -> Unit,
+    onOpenTranslate: () -> Unit,
+    onOpenVoice: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenClipboard: () -> Unit = {},
+    onOpenSmartReply: () -> Unit = {},
+    onOpenTemplates: () -> Unit = {},
+    onOpenThemes: () -> Unit = {},
+    onOpenLanguages: () -> Unit = {},
+    onOpenToolbarCustomize: () -> Unit = {},
+    onOpenNumericPad: () -> Unit = {}
+) {
+    var liveTrans by remember(currentComposingWord, activeLanguage.code, targetLang.code) {
+        mutableStateOf<String?>(
+            if (currentComposingWord.isNotBlank()) {
+                val trans = GoogleTranslationEngine.translateFast(currentComposingWord, activeLanguage.code, targetLang.code)
+                if (trans.isNotBlank() && trans.lowercase() != currentComposingWord.lowercase().trim()) trans else null
+            } else null
+        )
+    }
+
+    var forceShowTools by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentComposingWord, activeLanguage.code, targetLang.code) {
+        if (currentComposingWord.isNotBlank()) {
+            val online = GoogleTranslationEngine.translate(currentComposingWord, activeLanguage.code, targetLang.code)
+            if (online.isNotBlank() && online.lowercase() != currentComposingWord.lowercase().trim()) {
+                liveTrans = online
+            }
+        } else {
+            liveTrans = null
+            forceShowTools = false
+        }
+    }
+
+    // 3D Neumorphic Dark Glass Toolbar Background & Top Specular Glow Rim
+    val topStripBgBrush = Brush.verticalGradient(
+        colors = listOf(
+            Color(0xFF0F172A).copy(alpha = 0.96f),
+            Color(0xFF020617).copy(alpha = 0.98f)
+        )
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .background(topStripBgBrush)
+            .border(
+                width = 0.8.dp,
+                brush = Brush.horizontalGradient(
+                    listOf(
+                        Color(0x1534D399),
+                        Color(0x3534D399),
+                        Color(0x1534D399)
+                    )
+                ),
+                shape = RectangleShape
+            )
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isTyping && !forceShowTools && activeToolId == null) {
+            // WHEN TYPING: Left 3D Grid Toggle + Gboard 3-Candidate Strip + Right 3D Voice Mic
+            NeumorphicToggleGridButton(
+                isActive = false,
+                theme = theme,
+                onClick = { forceShowTools = true }
+            )
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!latestClip.isNullOrBlank()) {
+                    // 3D Neumorphic Centered Clipboard Suggestion Pill
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E293B).copy(alpha = 0.85f),
+                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .height(42.dp)
+                            .clickable { onPasteClip(latestClip) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ContentPaste,
+                                contentDescription = "Clipboard item",
+                                tint = Color(0xFF34D399),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = latestClip.replace("\n", " ").trim().take(20),
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Paste",
+                                color = Color(0xFF34D399),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else {
+                    // 3D Gboard 3-Candidate Suggestion Strip
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // LEFT SLOT: Literal typed text
+                        val literalText = candidateResult.literal.ifEmpty { currentComposingWord }
+                        Box(
+                            modifier = Modifier
+                                .weight(1.0f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E293B).copy(alpha = 0.6f))
+                                .clickable { onCommitCandidate(literalText, false, true) }
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (currentComposingWord.isNotEmpty()) "“$literalText”" else literalText,
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 13.sp,
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        // Divider 1
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(20.dp)
+                                .background(Color.White.copy(alpha = 0.15f))
+                        )
+
+                        // CENTER SLOT: Primary Candidate / Auto-Correction
+                        val primaryText = candidateResult.primary.ifEmpty { currentComposingWord }
+                        val isAutoCorrection = candidateResult.isAutoCorrection
+                        Box(
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isAutoCorrection) Color(0xFF10B981).copy(alpha = 0.22f)
+                                    else Color(0xFF1E293B).copy(alpha = 0.85f)
+                                )
+                                .border(
+                                    width = if (isAutoCorrection) 1.2.dp else 0.8.dp,
+                                    color = if (isAutoCorrection) Color(0xFF34D399).copy(alpha = 0.7f) else Color.White.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { onCommitCandidate(primaryText, false, false) }
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = primaryText,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (isAutoCorrection) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF34D399))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Divider 2
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(20.dp)
+                                .background(Color.White.copy(alpha = 0.15f))
+                        )
+
+                        // RIGHT SLOT: Live Translation OR Alternative Candidate
+                        val currentTrans = liveTrans
+                        if (currentTrans != null && currentComposingWord.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF6366F1),
+                                border = BorderStroke(1.dp, Color(0xFF818CF8)),
+                                modifier = Modifier
+                                    .weight(1.05f)
+                                    .fillMaxHeight()
+                                    .clickable { onCommitCandidate(currentTrans, true, false) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "✨ $currentTrans",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        } else {
+                            val altText = candidateResult.alternative.ifEmpty { "" }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1.0f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (altText.isNotEmpty()) Color(0xFF1E293B).copy(alpha = 0.6f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable(enabled = altText.isNotEmpty()) { onCommitCandidate(altText, false, false) }
+                                    .padding(horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (altText.isNotEmpty()) {
+                                    Text(
+                                        text = altText,
+                                        color = Color(0xFFCBD5E1),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Right: 3D Voice Mic
+            NeumorphicToggleGridButton(
+                isActive = false,
+                theme = theme,
+                onClick = { onOpenVoice() }
+            )
+        } else {
+            // FULL 3D NEUMORPHIC TOOLBAR: Left dedicated 3D squircle toggle + scrollable 3D pill buttons
+            val scrollState = rememberScrollState()
+
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Far Left: Dedicated 3D Neumorphic 4-Square Apps / Tools Toggle
+                NeumorphicToggleGridButton(
+                    isActive = (activeToolId == "tools"),
+                    theme = theme,
+                    onClick = {
+                        onToggleLeftGrid()
+                        if (forceShowTools) forceShowTools = false
+                    }
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Scrollable row of 3D Neumorphic Tool Chips in user-configured arrangement
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .horizontalScroll(scrollState),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Smart Paste Chip (if clipboard content exists)
+                    if (!latestClip.isNullOrBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .height(44.dp)
+                                .shadow(2.dp, shape = RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color(0xFF1E293B).copy(alpha = 0.85f),
+                                            Color(0xFF0F172A).copy(alpha = 0.95f)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    width = 0.8.dp,
+                                    brush = Brush.verticalGradient(
+                                        listOf(
+                                            Color(0xFF34D399).copy(alpha = 0.8f),
+                                            Color(0xFF10B981).copy(alpha = 0.2f)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onPasteClip(latestClip) }
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentPaste,
+                                    contentDescription = "Paste",
+                                    tint = Color(0xFF34D399),
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = latestClip.replace("\n", " ").trim().take(8),
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    // Render ordered toolbar items: Tools, Smart Reply, AI, Voice, Translate, Clipboard, Emoji, Themes, Settings, etc.
+                    for (toolId in toolbarItems) {
+                        when (toolId) {
+                            "tools" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.GridView,
+                                    label = "Tools",
+                                    isSelected = (activeToolId == "tools"),
+                                    iconColor = Color(0xFF34D399),
+                                    theme = theme,
+                                    onClick = onOpenTools
+                                )
+                            }
+
+                            "smart_reply" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.AutoAwesome,
+                                    label = "Smart Reply",
+                                    isSelected = (activeToolId == "smart_reply"),
+                                    iconColor = Color(0xFF818CF8),
+                                    theme = theme,
+                                    onClick = onOpenSmartReply
+                                )
+                            }
+
+                            "ai" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.SmartToy,
+                                    label = "AI",
+                                    isSelected = (activeToolId == "ai"),
+                                    iconColor = Color(0xFFF472B6),
+                                    theme = theme,
+                                    onClick = onOpenAI
+                                )
+                            }
+
+                            "voice" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Mic,
+                                    label = "Voice",
+                                    isSelected = (activeToolId == "voice"),
+                                    iconColor = Color(0xFF34D399),
+                                    theme = theme,
+                                    onClick = onOpenVoice
+                                )
+                            }
+
+                            "translate" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Translate,
+                                    label = "Translate",
+                                    isSelected = (activeToolId == "translate"),
+                                    iconColor = Color(0xFF60A5FA),
+                                    theme = theme,
+                                    onClick = onOpenTranslate
+                                )
+                            }
+
+                            "clipboard" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.ContentPaste,
+                                    label = "Clipboard",
+                                    isSelected = (activeToolId == "clipboard"),
+                                    iconColor = Color(0xFF38BDF8),
+                                    theme = theme,
+                                    onClick = onOpenClipboard
+                                )
+                            }
+
+                            "emoji" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.SentimentSatisfied,
+                                    label = "Emoji",
+                                    isSelected = (activeToolId == "emoji"),
+                                    iconColor = Color(0xFFFBBF24),
+                                    theme = theme,
+                                    onClick = onOpenEmoji
+                                )
+                            }
+
+                            "themes" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Palette,
+                                    label = "Themes",
+                                    isSelected = false,
+                                    iconColor = Color(0xFFA78BFA),
+                                    theme = theme,
+                                    onClick = onOpenThemes
+                                )
+                            }
+
+                            "settings" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Settings,
+                                    label = "Settings",
+                                    isSelected = false,
+                                    iconColor = Color(0xFF94A3B8),
+                                    theme = theme,
+                                    onClick = onOpenSettings
+                                )
+                            }
+
+                            "lang_selector" -> {
+                                val isLangActive = (activeToolId == "languages")
+                                val shape = RoundedCornerShape(12.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .height(44.dp)
+                                        .widthIn(min = 52.dp)
+                                        .then(
+                                            if (isLangActive) {
+                                                Modifier.shadow(
+                                                    elevation = 8.dp,
+                                                    shape = shape,
+                                                    ambientColor = Color(0xFF10B981),
+                                                    spotColor = Color(0xFF34D399)
+                                                )
+                                            } else {
+                                                Modifier.shadow(
+                                                    elevation = 2.dp,
+                                                    shape = shape,
+                                                    ambientColor = Color.Black.copy(alpha = 0.4f),
+                                                    spotColor = Color.Black.copy(alpha = 0.2f)
+                                                )
+                                            }
+                                        )
+                                        .clip(shape)
+                                        .background(
+                                            if (isLangActive) {
+                                                Brush.verticalGradient(
+                                                    listOf(
+                                                        Color(0xFF10B981),
+                                                        Color(0xFF059669),
+                                                        Color(0xFF047857)
+                                                    )
+                                                )
+                                            } else {
+                                                Brush.verticalGradient(
+                                                    listOf(
+                                                        Color(0xFF1E293B).copy(alpha = 0.85f),
+                                                        Color(0xFF0F172A).copy(alpha = 0.95f)
+                                                    )
+                                                )
+                                            }
+                                        )
+                                        .border(
+                                            width = if (isLangActive) 1.2.dp else 0.8.dp,
+                                            brush = if (isLangActive) {
+                                                Brush.verticalGradient(
+                                                    listOf(
+                                                        Color(0xFF6EE7B7),
+                                                        Color(0xFF10B981).copy(alpha = 0.5f)
+                                                    )
+                                                )
+                                            } else {
+                                                Brush.verticalGradient(
+                                                    listOf(
+                                                        Color.White.copy(alpha = 0.22f),
+                                                        Color.White.copy(alpha = 0.04f)
+                                                    )
+                                                )
+                                            },
+                                            shape = shape
+                                        )
+                                        .clickable { onOpenLanguages() }
+                                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "${activeLanguage.flagEmoji} ${activeLanguage.code.uppercase()}",
+                                                color = if (isLangActive) Color.White else Color(0xFFF1F5F9),
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (realtimeAutoTranslate) {
+                                                Text(
+                                                    text = "⇄",
+                                                    color = if (isLangActive) Color.White else Color(0xFF34D399),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = if (realtimeAutoTranslate) targetLang.code.uppercase() else "Lang",
+                                            color = if (isLangActive) Color.White else Color(0xFFCBD5E1),
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+
+                            "stickers" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Celebration,
+                                    label = "Templates",
+                                    isSelected = (activeToolId == "stickers"),
+                                    iconColor = Color(0xFFF43F5E),
+                                    theme = theme,
+                                    onClick = onOpenTemplates
+                                )
+                            }
+
+                            "languages" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Language,
+                                    label = "Languages",
+                                    isSelected = (activeToolId == "languages"),
+                                    iconColor = Color(0xFF14B8A6),
+                                    theme = theme,
+                                    onClick = onOpenLanguages
+                                )
+                            }
+
+                            "numpad" -> {
+                                NeumorphicToolChip(
+                                    icon = Icons.Default.Dialpad,
+                                    label = "1234",
+                                    isSelected = (activeToolId == "numpad"),
+                                    iconColor = Color(0xFF2DD4BF),
+                                    theme = theme,
+                                    onClick = onOpenNumericPad
+                                )
+                            }
+                        }
+                    }
+
+                    // Always ensure Settings and Edit toolbar buttons are available at the end
+                    if (!toolbarItems.contains("settings")) {
+                        NeumorphicToolChip(
+                            icon = Icons.Default.Settings,
+                            label = "Settings",
+                            isSelected = false,
+                            iconColor = Color(0xFF94A3B8),
+                            theme = theme,
+                            onClick = onOpenSettings
+                        )
+                    }
+
+                    NeumorphicToolChip(
+                        icon = Icons.Default.Tune,
+                        label = "Edit",
+                        isSelected = (activeToolId == "customize"),
+                        iconColor = Color(0xFF94A3B8),
+                        theme = theme,
+                        onClick = onOpenToolbarCustomize
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 3D Neumorphic Extruded Tool Squircle Chip
+ * Exactly recreates the glowing 3D pill/squircle design with soft specular top edge and ambient drop glow.
+ */
+@Composable
+fun NeumorphicToolChip(
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean = false,
+    iconColor: Color = Color(0xFF94A3B8),
+    theme: KeyboardTheme,
+    contentDescription: String = label,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(12.dp)
+
+    // 3D Neumorphic Background Brush
+    val backgroundBrush = if (isSelected) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF10B981), // Vivid Glowing Emerald on top
+                Color(0xFF059669), // Rich Emerald mid
+                Color(0xFF047857)  // Deep Emerald base
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF1E293B).copy(alpha = 0.85f), // Top convex highlight
+                Color(0xFF0F172A).copy(alpha = 0.95f)  // Base shadow
+            )
+        )
+    }
+
+    // 3D Specular Rim / Glowing Highlight Border
+    val borderBrush = if (isSelected) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF6EE7B7), // Bright glowing rim
+                Color(0xFF10B981).copy(alpha = 0.5f)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.22f), // Specular light highlight on top edge
+                Color.White.copy(alpha = 0.04f)  // Dark falloff
+            )
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .height(44.dp)
+            .widthIn(min = 52.dp)
+            .then(
+                if (isSelected) {
+                    Modifier.shadow(
+                        elevation = 8.dp,
+                        shape = shape,
+                        ambientColor = Color(0xFF10B981),
+                        spotColor = Color(0xFF34D399)
+                    )
+                } else {
+                    Modifier.shadow(
+                        elevation = 2.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = 0.4f),
+                        spotColor = Color.Black.copy(alpha = 0.2f)
+                    )
+                }
+            )
+            .clip(shape)
+            .background(brush = backgroundBrush)
+            .border(
+                width = if (isSelected) 1.2.dp else 0.8.dp,
+                brush = borderBrush,
+                shape = shape
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = if (isSelected) Color.White else iconColor,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = label,
+                color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                fontSize = 10.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+/**
+ * Standalone 3D Neumorphic 4-Square Apps / Tools Grid Toggle Button
+ */
+@Composable
+fun NeumorphicToggleGridButton(
+    isActive: Boolean,
+    theme: KeyboardTheme,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(12.dp)
+    val backgroundBrush = if (isActive) {
+        Brush.verticalGradient(
+            listOf(
+                Color(0xFF10B981),
+                Color(0xFF059669),
+                Color(0xFF047857)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color(0xFF1E293B).copy(alpha = 0.85f),
+                Color(0xFF0F172A).copy(alpha = 0.95f)
+            )
+        )
+    }
+    val borderBrush = if (isActive) {
+        Brush.verticalGradient(
+            listOf(
+                Color(0xFF6EE7B7),
+                Color(0xFF10B981).copy(alpha = 0.5f)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.24f),
+                Color.White.copy(alpha = 0.04f)
+            )
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .then(
+                if (isActive) {
+                    Modifier.shadow(
+                        elevation = 6.dp,
+                        shape = shape,
+                        ambientColor = Color(0xFF10B981),
+                        spotColor = Color(0xFF34D399)
+                    )
+                } else {
+                    Modifier.shadow(
+                        elevation = 2.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = 0.4f),
+                        spotColor = Color.Black.copy(alpha = 0.2f)
+                    )
+                }
+            )
+            .clip(shape)
+            .background(brush = backgroundBrush)
+            .border(
+                width = if (isActive) 1.2.dp else 0.8.dp,
+                brush = borderBrush,
+                shape = shape
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.GridView,
+            contentDescription = "Tools Toggle",
+            tint = if (isActive) Color.White else Color(0xFFE2E8F0),
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
@@ -1516,15 +2621,15 @@ fun ThemedKeyBox(
     isSpecial: Boolean = false,
     isSelected: Boolean = false,
     isPressed: Boolean = false,
-    height: Dp = 48.dp,
+    height: Dp = 45.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val cornerRadius = when (theme.themeStyle) {
-        ThemeStyle.CLAYMORPHISM -> 11f
-        ThemeStyle.NEOBRUTALISM -> 5f
-        ThemeStyle.FLAT_DESIGN -> 4f
-        else -> theme.keyCornerRadius
+        ThemeStyle.CLAYMORPHISM -> 10f
+        ThemeStyle.NEOBRUTALISM -> 4f
+        ThemeStyle.FLAT_DESIGN -> 7f
+        else -> 7f
     }.dp
 
     val shape = if (isSelected && isSpecial) RoundedCornerShape(16.dp) else RoundedCornerShape(cornerRadius)
@@ -1844,7 +2949,7 @@ fun KeyButton(
     modifier: Modifier = Modifier,
     theme: KeyboardTheme,
     topHint: String? = null,
-    height: Dp = 48.dp,
+    height: Dp = 45.dp,
     showPreview: Boolean = true,
     onClick: () -> Unit
 ) {
@@ -1876,7 +2981,7 @@ fun KeyButton(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 2.dp, vertical = 2.dp)
+                .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
         ) {
             ThemedKeyBox(
                 theme = theme,
@@ -1898,39 +3003,45 @@ fun KeyButton(
                             .padding(top = 2.dp, end = 3.5.dp)
                     )
                 }
+                val keyFontSize = (height.value * 0.46f).coerceIn(18f, 26f).sp
                 Text(
                     text = text,
                     color = theme.textColor,
-                    fontSize = 17.5.sp,
-                    fontWeight = FontWeight.Normal
+                    fontSize = keyFontSize,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center)
                 )
             }
         }
 
         // Gboard-Style Floating 3D Key Preview Popup (Character Magnifier)
         if (isPressed && showPreview && text.length == 1) {
+            val previewHeight = (height * 0.95f).coerceIn(42.dp, 56.dp)
+            val previewOffset = -(previewHeight - 2.dp)
+            val previewFontSize = (previewHeight.value * 0.50f).coerceIn(21f, 29f).sp
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = (-46).dp)
-                    .width(52.dp)
-                    .height(48.dp)
+                    .offset(y = previewOffset)
+                    .width(50.dp)
+                    .height(previewHeight)
                     .zIndex(100f)
-                    .shadow(10.dp, shape = RoundedCornerShape(12.dp))
+                    .shadow(8.dp, shape = RoundedCornerShape(10.dp))
                     .background(
                         if (theme.isDark) Color(0xFF282C37) else Color(0xFFF1F3F4),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     )
                     .border(
                         1.dp,
                         theme.primaryColor.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = text,
-                    fontSize = 24.sp,
+                    fontSize = previewFontSize,
                     fontWeight = FontWeight.Bold,
                     color = if (theme.isDark) Color.White else Color(0xFF1E293B)
                 )
@@ -1946,7 +3057,7 @@ fun KeySpecialButton(
     text: String? = null,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     isSelected: Boolean = false,
-    height: Dp = 48.dp,
+    height: Dp = 45.dp,
     onClick: () -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
@@ -1976,7 +3087,7 @@ fun KeySpecialButton(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 2.dp, vertical = 2.dp)
+                .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
         ) {
             ThemedKeyBox(
                 theme = theme,
@@ -2015,7 +3126,7 @@ fun KeySpecialButton(
 fun KeyBackspaceButton(
     modifier: Modifier = Modifier,
     theme: KeyboardTheme,
-    height: Dp = 48.dp,
+    height: Dp = 45.dp,
     onDelete: () -> Unit,
     onDeleteWord: () -> Unit = {}
 ) {
@@ -2084,7 +3195,7 @@ fun KeyBackspaceButton(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 2.dp, vertical = 2.dp)
+                .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
         ) {
             ThemedKeyBox(
                 theme = theme,
@@ -2121,207 +3232,482 @@ fun BottomActionRow(
     keyboardMode: KeyboardMode,
     activeLanguage: Language,
     enabledLanguages: List<Language>,
-    height: Dp = 48.dp,
+    height: Dp = 45.dp,
     isTransliterationActive: Boolean = false,
     editorInfo: EditorInfo? = null,
     onMoveCursor: (Int) -> Unit = {},
     onSwitchMode: (KeyboardMode) -> Unit,
+    onComma: () -> Unit = {},
+    onPeriod: () -> Unit = {},
+    onInsertSymbol: (String) -> Unit = {},
     onSwitchLanguage: () -> Unit,
     onOpenLanguagePanel: () -> Unit = {},
     onSpace: () -> Unit,
     onOpenEmoji: () -> Unit,
     onEnter: () -> Unit
 ) {
+    val view = LocalView.current
     var isSpacePressed by remember { mutableStateOf(false) }
     var isDraggingCursor by remember { mutableStateOf(false) }
+    var isPeriodPressed by remember { mutableStateOf(false) }
 
-    Row(
+    // Period Key Floating Symbol Bubble State (Gboard Punctuation Popup)
+    var isSymbolPopupVisible by remember { mutableStateOf(false) }
+    var selectedSymbol by remember { mutableStateOf<String?>(null) }
+    var periodKeyOffsetInRow by remember { mutableStateOf(Offset.Zero) }
+    var bubbleOffsetInRow by remember { mutableStateOf(Offset.Zero) }
+    var bubbleSizeInRow by remember { mutableStateOf(IntSize.Zero) }
+
+    val symbolsRow1 = remember { listOf("&", "%", "+", "\"", "-", ":", "'", "@") }
+    val symbolsRow2 = remember { listOf(";", "/", "(", ")", "#", "!", ",", "?") }
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(1.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .zIndex(200f)
     ) {
-        // Mode Switcher (?123 or ABC)
-        KeySpecialButton(
-            text = if (keyboardMode == KeyboardMode.ALPHABET) "?123" else "ABC",
-            modifier = Modifier.weight(1.3f),
-            theme = theme,
-            height = height,
-            onClick = {
-                onSwitchMode(if (keyboardMode == KeyboardMode.ALPHABET) KeyboardMode.NUMBERS else KeyboardMode.ALPHABET)
-            }
-        )
-
-        // Language Globe Button (Tap to cycle language, Long-press to open full language panel)
-        Box(
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .height(height)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onSwitchLanguage() },
-                        onLongPress = { onOpenLanguagePanel() }
-                    )
-                },
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(horizontal = 1.dp, vertical = 0.5.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 2.dp, vertical = 2.dp)
-            ) {
-                ThemedKeyBox(
-                    theme = theme,
-                    modifier = Modifier.fillMaxSize(),
-                    isSpecial = true,
-                    isSelected = false,
-                    height = height,
-                    onClick = null
-                ) {
-                    Icon(
-                        Icons.Default.Language,
-                        contentDescription = "Language",
-                        tint = theme.textColor,
-                        modifier = Modifier.size(19.dp)
-                    )
+            // 1. Mode Switcher (?123 or ABC) - Weight 1.2f
+            KeySpecialButton(
+                text = if (keyboardMode == KeyboardMode.ALPHABET) "?123" else "ABC",
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                height = height,
+                onClick = {
+                    onSwitchMode(if (keyboardMode == KeyboardMode.ALPHABET) KeyboardMode.NUMBERS else KeyboardMode.ALPHABET)
                 }
-            }
-        }
+            )
 
-        // Space Bar with Cursor Scrubbing & Long-Press Language Selection
-        Box(
-            modifier = Modifier
-                .weight(4.7f)
-                .height(height)
-                .pointerInput(Unit) {
-                    kotlinx.coroutines.coroutineScope {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            isSpacePressed = true
-                            var totalDragX = 0f
-                            var didDrag = false
-                            var didLongPress = false
-                            val dragThreshold = 20f
-
-                            val longPressTimer = this@coroutineScope.launch {
-                                kotlinx.coroutines.delay(400)
-                                if (!didDrag) {
-                                    didLongPress = true
-                                    onOpenLanguagePanel()
-                                }
-                            }
-
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!change.pressed) break
-
-                                val deltaX = change.position.x - change.previousPosition.x
-                                totalDragX += deltaX
-
-                                if (Math.abs(totalDragX) >= dragThreshold) {
-                                    longPressTimer.cancel()
-                                    didDrag = true
-                                    isDraggingCursor = true
-                                    val step = if (totalDragX > 0) 1 else -1
-                                    onMoveCursor(step)
-                                    totalDragX = 0f
-                                }
-                            }
-
-                            longPressTimer.cancel()
-                            if (!didDrag && !didLongPress) {
-                                onSpace()
-                            }
-                            isSpacePressed = false
-                            isDraggingCursor = false
+            // 2. Comma or Numpad Switcher Key - Weight 1.0f
+            if (keyboardMode == KeyboardMode.NUMBERS) {
+                KeySpecialButton(
+                    text = "1234",
+                    icon = Icons.Default.Dialpad,
+                    modifier = Modifier.weight(1.0f),
+                    theme = theme,
+                    height = height,
+                    onClick = {
+                        onSwitchMode(KeyboardMode.NUMERIC_PAD)
+                    }
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .weight(1.0f)
+                        .height(height)
+                        .clickable { onComma() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
+                    ) {
+                        ThemedKeyBox(
+                            theme = theme,
+                            modifier = Modifier.fillMaxSize(),
+                            isSpecial = true,
+                            isSelected = false,
+                            height = height,
+                            onClick = null
+                        ) {
+                            Text(
+                                text = ",",
+                                color = theme.textColor,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
                         }
                     }
-                },
-            contentAlignment = Alignment.Center
-        ) {
+                }
+            }
+
+            // 3. Dedicated Emoji Key (Distinct side-by-side key) - Weight 1.0f
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 2.dp, vertical = 2.dp)
+                    .weight(1.0f)
+                    .height(height)
+                    .clickable { onOpenEmoji() },
+                contentAlignment = Alignment.Center
             ) {
-                ThemedKeyBox(
-                    theme = theme,
-                    modifier = Modifier.fillMaxSize(),
-                    isSpecial = false,
-                    isSelected = isDraggingCursor,
-                    isPressed = isSpacePressed,
-                    height = height,
-                    onClick = null
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
                 ) {
-                    if (isDraggingCursor) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.SwapHoriz,
-                                contentDescription = null,
-                                tint = theme.accentColor,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Text(
-                                text = "‹ Cursor Movement ›",
-                                color = theme.accentColor,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    } else {
-                        val translitSuffix = if (isTransliterationActive && activeLanguage.id != "en") " (${activeLanguage.nativeName})" else ""
-                        Text(
-                            text = "${activeLanguage.flagEmoji} ${activeLanguage.displayName}$translitSuffix",
-                            color = theme.textSecondaryColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    ThemedKeyBox(
+                        theme = theme,
+                        modifier = Modifier.fillMaxSize(),
+                        isSpecial = true,
+                        isSelected = false,
+                        height = height,
+                        onClick = null
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SentimentSatisfied,
+                            contentDescription = "Emoji",
+                            tint = theme.textColor,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .align(Alignment.Center)
                         )
                     }
                 }
             }
+
+            // 4. Space Bar (Weight 4.8f -> authentic Gboard spacious footprint) with Cursor Scrubbing & Language Label
+            Box(
+                modifier = Modifier
+                    .weight(4.8f)
+                    .height(height)
+                    .pointerInput(Unit) {
+                        kotlinx.coroutines.coroutineScope {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                isSpacePressed = true
+                                var totalDragX = 0f
+                                var didDrag = false
+                                var didLongPress = false
+                                val dragThreshold = 18f
+
+                                val longPressTimer = this@coroutineScope.launch {
+                                    kotlinx.coroutines.delay(380)
+                                    if (!didDrag) {
+                                        didLongPress = true
+                                        onOpenLanguagePanel()
+                                    }
+                                }
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+
+                                    val deltaX = change.position.x - change.previousPosition.x
+                                    totalDragX += deltaX
+
+                                    if (Math.abs(totalDragX) >= dragThreshold) {
+                                        longPressTimer.cancel()
+                                        didDrag = true
+                                        isDraggingCursor = true
+                                        val step = if (totalDragX > 0) 1 else -1
+                                        onMoveCursor(step)
+                                        totalDragX = 0f
+                                    }
+                                }
+
+                                longPressTimer.cancel()
+                                if (!didDrag && !didLongPress) {
+                                    onSpace()
+                                }
+                                isSpacePressed = false
+                                isDraggingCursor = false
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
+                ) {
+                    ThemedKeyBox(
+                        theme = theme,
+                        modifier = Modifier.fillMaxSize(),
+                        isSpecial = false,
+                        isSelected = isDraggingCursor,
+                        isPressed = isSpacePressed,
+                        height = height,
+                        onClick = null
+                    ) {
+                        if (isDraggingCursor) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.SwapHoriz,
+                                    contentDescription = null,
+                                    tint = theme.accentColor,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = "‹ Cursor Movement ›",
+                                    color = theme.accentColor,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            val translitSuffix = if (isTransliterationActive && activeLanguage.id != "en") " (${activeLanguage.nativeName})" else ""
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${activeLanguage.flagEmoji} ${activeLanguage.displayName}$translitSuffix",
+                                    color = theme.textSecondaryColor,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Switch or select language",
+                                    tint = theme.textSecondaryColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Period Key with Floating Symbol Bubble on Long-Press / Drag - Weight 0.8f
+            Box(
+                modifier = Modifier
+                    .weight(0.8f)
+                    .height(height)
+                    .onGloballyPositioned { coords ->
+                        periodKeyOffsetInRow = coords.positionInParent()
+                    }
+                    .pointerInput(Unit) {
+                        kotlinx.coroutines.coroutineScope {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                isPeriodPressed = true
+                                var isLongPress = false
+                                selectedSymbol = null
+                                var currentTouch = down.position
+
+                                val longPressJob = this@coroutineScope.launch {
+                                    kotlinx.coroutines.delay(220)
+                                    isLongPress = true
+                                    isSymbolPopupVisible = true
+                                    try {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    } catch (e: Exception) {}
+                                }
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    currentTouch = change.position
+
+                                    if (isLongPress) {
+                                        val effectiveBubbleWidth = if (bubbleSizeInRow.width > 0) bubbleSizeInRow.width.toFloat() else 800f
+                                        val effectiveBubbleHeight = if (bubbleSizeInRow.height > 0) bubbleSizeInRow.height.toFloat() else 220f
+
+                                        val touchXInRow = currentTouch.x + periodKeyOffsetInRow.x
+                                        val touchYInRow = currentTouch.y + periodKeyOffsetInRow.y
+
+                                        val localX = touchXInRow - bubbleOffsetInRow.x
+                                        val localY = touchYInRow - bubbleOffsetInRow.y
+
+                                        val margin = 32f
+                                        if (localX in -margin..(effectiveBubbleWidth + margin) &&
+                                            localY in -margin..(effectiveBubbleHeight + margin)) {
+                                            val clampedX = localX.coerceIn(0f, effectiveBubbleWidth - 1f)
+                                            val clampedY = localY.coerceIn(0f, effectiveBubbleHeight - 1f)
+                                            val colWidth = effectiveBubbleWidth / 8f
+                                            val rowHeight = effectiveBubbleHeight / 2f
+
+                                            val col = (clampedX / colWidth).toInt().coerceIn(0, 7)
+                                            val row = (clampedY / rowHeight).toInt().coerceIn(0, 1)
+
+                                            val newSelected = if (row == 0) symbolsRow1[col] else symbolsRow2[col]
+                                            if (newSelected != selectedSymbol) {
+                                                selectedSymbol = newSelected
+                                                try {
+                                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                } catch (e: Exception) {}
+                                            }
+                                        }
+                                    }
+                                }
+
+                                longPressJob.cancel()
+                                if (isLongPress) {
+                                    if (selectedSymbol != null) {
+                                        onInsertSymbol(selectedSymbol!!)
+                                        try {
+                                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        } catch (e: Exception) {}
+                                    } else {
+                                        onPeriod()
+                                    }
+                                } else {
+                                    onPeriod()
+                                }
+                                isPeriodPressed = false
+                                isSymbolPopupVisible = false
+                                selectedSymbol = null
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
+                ) {
+                    ThemedKeyBox(
+                        theme = theme,
+                        modifier = Modifier.fillMaxSize(),
+                        isSpecial = true,
+                        isSelected = isPeriodPressed || isSymbolPopupVisible,
+                        height = height,
+                        onClick = null
+                    ) {
+                        Text(
+                            text = ".",
+                            color = theme.textColor,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                }
+            }
+
+            // 6. Enter / Action Key (Dynamic Search / Send / Go / Next / Done) - Weight 1.2f
+            val imeAction = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+            val isMultiline = editorInfo?.inputType?.let { inputType ->
+                (inputType and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT) &&
+                        (inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
+            } ?: false
+
+            val actionIcon = when {
+                isMultiline -> Icons.AutoMirrored.Filled.KeyboardReturn
+                imeAction == EditorInfo.IME_ACTION_SEARCH -> Icons.Default.Search
+                imeAction == EditorInfo.IME_ACTION_GO -> Icons.AutoMirrored.Filled.ArrowForward
+                imeAction == EditorInfo.IME_ACTION_SEND -> Icons.AutoMirrored.Filled.Send
+                imeAction == EditorInfo.IME_ACTION_NEXT -> Icons.AutoMirrored.Filled.ArrowForward
+                imeAction == EditorInfo.IME_ACTION_DONE -> Icons.Default.Done
+                else -> Icons.AutoMirrored.Filled.KeyboardReturn
+            }
+
+            KeySpecialButton(
+                icon = actionIcon,
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                isSelected = true,
+                height = height,
+                onClick = onEnter
+            )
         }
 
-        // Emoji Button
-        KeySpecialButton(
-            icon = Icons.Default.SentimentSatisfied,
-            modifier = Modifier.weight(1f),
-            theme = theme,
-            height = height,
-            onClick = onOpenEmoji
-        )
+        // GBOARD FLOATING SYMBOL BUBBLE POPUP (Period Long-Press / Drag Punctuation Grid)
+        if (isSymbolPopupVisible) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = (-6).dp, y = (-94).dp)
+                    .width(316.dp)
+                    .height(88.dp)
+                    .zIndex(1000f)
+                    .onGloballyPositioned { coords ->
+                        bubbleOffsetInRow = coords.positionInParent()
+                        bubbleSizeInRow = coords.size
+                    }
+                    .shadow(12.dp, shape = RoundedCornerShape(16.dp))
+                    .background(
+                        if (theme.isDark) Color(0xFF262A33) else Color(0xFFF1F3F4),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = theme.primaryColor.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    // Row 1: &   %   +   "   -   :   '   @
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (symbol in symbolsRow1) {
+                            val isSelected = symbol == selectedSymbol
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) theme.primaryColor else Color.Transparent)
+                                    .clickable {
+                                        onInsertSymbol(symbol)
+                                        isSymbolPopupVisible = false
+                                        selectedSymbol = null
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = symbol,
+                                    color = if (isSelected) Color.White else theme.textColor,
+                                    fontSize = if (isSelected) 21.sp else 17.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
 
-        // Enter / Action Key (Dynamic Pill / Primary Action based on field action)
-        val imeAction = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
-        val isMultiline = editorInfo?.inputType?.let { inputType ->
-            (inputType and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT) &&
-                    (inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
-        } ?: false
-
-        val actionIcon = when {
-            isMultiline -> Icons.AutoMirrored.Filled.KeyboardReturn
-            imeAction == EditorInfo.IME_ACTION_SEARCH -> Icons.Default.Search
-            imeAction == EditorInfo.IME_ACTION_GO -> Icons.AutoMirrored.Filled.ArrowForward
-            imeAction == EditorInfo.IME_ACTION_SEND -> Icons.AutoMirrored.Filled.Send
-            imeAction == EditorInfo.IME_ACTION_NEXT -> Icons.AutoMirrored.Filled.ArrowForward
-            imeAction == EditorInfo.IME_ACTION_DONE -> Icons.Default.Done
-            else -> Icons.AutoMirrored.Filled.KeyboardReturn
+                    // Row 2: ;   /   (   )   #   !   ,   ?
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (symbol in symbolsRow2) {
+                            val isSelected = symbol == selectedSymbol
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) theme.primaryColor else Color.Transparent)
+                                    .clickable {
+                                        onInsertSymbol(symbol)
+                                        isSymbolPopupVisible = false
+                                        selectedSymbol = null
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = symbol,
+                                    color = if (isSelected) Color.White else theme.textColor,
+                                    fontSize = if (isSelected) 21.sp else 17.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
-
-        KeySpecialButton(
-            icon = actionIcon,
-            modifier = Modifier.weight(1.4f),
-            theme = theme,
-            isSelected = true,
-            height = height,
-            onClick = onEnter
-        )
     }
 }
 
@@ -3901,6 +5287,295 @@ fun EmojiPanel(
             IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                 Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = theme.textColor)
             }
+        }
+    }
+}
+
+@Composable
+fun DedicatedNumericPad(
+    theme: KeyboardTheme,
+    panelHeight: Dp,
+    editorInfo: EditorInfo? = null,
+    onKeyPress: (String) -> Unit,
+    onDelete: () -> Unit,
+    onDeleteWord: () -> Unit,
+    onSpace: () -> Unit,
+    onEnter: () -> Unit,
+    onSwitchMode: (KeyboardMode) -> Unit
+) {
+    val rowHeight = ((panelHeight - 16.dp) / 5).coerceIn(48.dp, 56.dp)
+
+    val imeAction = editorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+    val isMultiline = editorInfo?.inputType?.let { inputType ->
+        (inputType and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT) &&
+                (inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
+    } ?: false
+
+    val actionIcon = when {
+        isMultiline -> Icons.AutoMirrored.Filled.KeyboardReturn
+        imeAction == EditorInfo.IME_ACTION_SEARCH -> Icons.Default.Search
+        imeAction == EditorInfo.IME_ACTION_GO -> Icons.AutoMirrored.Filled.ArrowForward
+        imeAction == EditorInfo.IME_ACTION_SEND -> Icons.AutoMirrored.Filled.Send
+        imeAction == EditorInfo.IME_ACTION_NEXT -> Icons.AutoMirrored.Filled.ArrowForward
+        imeAction == EditorInfo.IME_ACTION_DONE -> Icons.Default.Done
+        else -> Icons.AutoMirrored.Filled.KeyboardReturn
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(panelHeight)
+            .padding(horizontal = 2.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.SpaceEvenly
+    ) {
+        // ROW 1: [ + ] [ 1 ] [ 2 ] [ 3 ] [ ⌫ ]
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            KeySpecialButton(
+                text = "+",
+                modifier = Modifier.weight(1f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("+") }
+            )
+            KeyButton(
+                text = "1",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("1") }
+            )
+            KeyButton(
+                text = "2",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("2") }
+            )
+            KeyButton(
+                text = "3",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("3") }
+            )
+            KeyBackspaceButton(
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                height = rowHeight,
+                onDelete = onDelete,
+                onDeleteWord = onDeleteWord
+            )
+        }
+
+        // ROW 2: [ - ] [ 4 ] [ 5 ] [ 6 ] [ ( ]
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            KeySpecialButton(
+                text = "-",
+                modifier = Modifier.weight(1f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("-") }
+            )
+            KeyButton(
+                text = "4",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("4") }
+            )
+            KeyButton(
+                text = "5",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("5") }
+            )
+            KeyButton(
+                text = "6",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("6") }
+            )
+            KeySpecialButton(
+                text = "(",
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("(") }
+            )
+        }
+
+        // ROW 3: [ * ] [ 7 ] [ 8 ] [ 9 ] [ ) ]
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            KeySpecialButton(
+                text = "*",
+                modifier = Modifier.weight(1f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("*") }
+            )
+            KeyButton(
+                text = "7",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("7") }
+            )
+            KeyButton(
+                text = "8",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("8") }
+            )
+            KeyButton(
+                text = "9",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("9") }
+            )
+            KeySpecialButton(
+                text = ")",
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress(")") }
+            )
+        }
+
+        // ROW 4: [ / ] [ , ] [ 0 ] [ . ] [ = ]
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            KeySpecialButton(
+                text = "/",
+                modifier = Modifier.weight(1f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("/") }
+            )
+            KeySpecialButton(
+                text = ",",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress(",") }
+            )
+            KeyButton(
+                text = "0",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                showPreview = true,
+                onClick = { onKeyPress("0") }
+            )
+            KeySpecialButton(
+                text = ".",
+                modifier = Modifier.weight(1.3f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress(".") }
+            )
+            KeySpecialButton(
+                text = "=",
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("=") }
+            )
+        }
+
+        // ROW 5: Bottom Action Bar [ ABC ] [ !?# ] [ Space ] [ % ] [ ⏎ Enter ]
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            KeySpecialButton(
+                text = "ABC",
+                modifier = Modifier.weight(1.4f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onSwitchMode(KeyboardMode.ALPHABET) }
+            )
+            KeySpecialButton(
+                text = "!?#",
+                modifier = Modifier.weight(1.2f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onSwitchMode(KeyboardMode.NUMBERS) }
+            )
+            // Spacebar
+            Box(
+                modifier = Modifier
+                    .weight(2.4f)
+                    .height(rowHeight)
+                    .clickable { onSpace() },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 2.25.dp, vertical = 2.dp)
+                ) {
+                    ThemedKeyBox(
+                        theme = theme,
+                        modifier = Modifier.fillMaxSize(),
+                        isSpecial = false,
+                        isSelected = false,
+                        height = rowHeight,
+                        onClick = null
+                    ) {
+                        Text(
+                            text = "space",
+                            color = theme.textSecondaryColor.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Normal,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                }
+            }
+            KeySpecialButton(
+                text = "%",
+                modifier = Modifier.weight(1f),
+                theme = theme,
+                height = rowHeight,
+                onClick = { onKeyPress("%") }
+            )
+            KeySpecialButton(
+                icon = actionIcon,
+                modifier = Modifier.weight(1.4f),
+                theme = theme,
+                isSelected = true,
+                height = rowHeight,
+                onClick = onEnter
+            )
         }
     }
 }

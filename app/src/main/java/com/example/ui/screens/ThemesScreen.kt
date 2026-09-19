@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,9 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +46,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.CreditsSecurityManager
 import com.example.data.LingoKeyPreferences
-import com.example.engine.VoiceTTSEngine
 import com.example.model.KeyboardTheme
 import com.example.model.ThemeStyle
 
@@ -80,7 +83,6 @@ fun ThemesScreen(
     onNavigateToSpinAndWin: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val voiceTTSEngine = remember { VoiceTTSEngine.getInstance(context) }
     val creditsSecurityManager = remember { CreditsSecurityManager.getInstance(context) }
 
     val currentTheme by preferences.currentTheme.collectAsState()
@@ -97,10 +99,6 @@ fun ThemesScreen(
     var unlockWithCreditsTarget by remember { mutableStateOf<KeyboardTheme?>(null) }
     var insufficientCreditsTarget by remember { mutableStateOf<KeyboardTheme?>(null) }
     var showCustomThemeDialog by remember { mutableStateOf(false) }
-
-    // Interactive Typing state inside the locked top preview
-    var testInputText by remember { mutableStateOf("Global Keyboard") }
-    var lastComposedWord by remember { mutableStateOf("") }
 
     // Custom Theme Builder State
     var selectedGradientIndex by remember { mutableStateOf(0) }
@@ -153,19 +151,12 @@ fun ThemesScreen(
             ) {
                 TopAppBar(
                     title = {
-                        Column {
-                            Text(
-                                "Themes & Styles",
-                                color = textColor,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.5.sp
-                            )
-                            Text(
-                                "3D Neumorphism, Glass & Custom Studio",
-                                color = textMuted,
-                                fontSize = 11.sp
-                            )
-                        }
+                        Text(
+                            "Themes & Styles",
+                            color = textColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -177,6 +168,35 @@ fun ThemesScreen(
                         }
                     },
                     actions = {
+                        // Custom Studio Shortcut Pill
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xFFEC4899).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFFEC4899).copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .clickable { showCustomThemeDialog = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = "Custom Studio",
+                                    tint = Color(0xFFEC4899),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    "Custom",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFEC4899)
+                                )
+                            }
+                        }
+
                         // Credits Balance Pill (Tapping opens Spin & Win)
                         Surface(
                             shape = RoundedCornerShape(20.dp),
@@ -256,7 +276,7 @@ fun ThemesScreen(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Header Row of Locked Preview: Theme Name, Style Tag, and Apply/Download Action
+                    // Header Row of Locked Preview: Theme Name & Active Badge on Left, Apply/Unlock on Right
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -264,43 +284,41 @@ fun ThemesScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                previewingTheme.themeStyle.iconEmoji,
-                                fontSize = 16.sp
+                                text = previewingTheme.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = textColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        previewingTheme.name,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp,
-                                        color = textColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (currentTheme.id == previewingTheme.id) {
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = Color(0xFF10B981).copy(alpha = 0.2f),
-                                            border = BorderStroke(0.8.dp, Color(0xFF10B981))
-                                        ) {
-                                            Text(
-                                                "Active",
-                                                color = Color(0xFF10B981),
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
-                                        }
+                            if (currentTheme.id == previewingTheme.id) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                    border = BorderStroke(1.dp, Color(0xFF10B981))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color(0xFF10B981),
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Text(
+                                            "Active",
+                                            color = Color(0xFF10B981),
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
-                                Text(
-                                    previewingTheme.themeStyle.displayName,
-                                    fontSize = 10.5.sp,
-                                    color = textMuted
-                                )
                             }
                         }
 
@@ -311,87 +329,43 @@ fun ThemesScreen(
 
                         if (isCurrent) {
                             Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = Color(0xFF10B981),
-                                modifier = Modifier.padding(vertical = 2.dp)
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981))
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                                    Text("Active Theme", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = Color(0xFF10B981),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text("Active", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         } else if (isAvailable) {
                             Button(
                                 onClick = { handleApplyOrUnlock(previewingTheme) },
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier.height(32.dp)
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                modifier = Modifier.height(30.dp)
                             ) {
-                                Text("Apply Theme", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Apply", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         } else {
                             Button(
                                 onClick = { handleApplyOrUnlock(previewingTheme) },
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEAB308)),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier.height(32.dp)
+                                modifier = Modifier.height(30.dp)
                             ) {
-                                Text("🪙 $cost • Unlock", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                            }
-                        }
-                    }
-
-                    // Live Text Output & Clear / Speaker
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isDarkMode) Color(0xFF090A0E) else Color(0xFFF1F5F9))
-                            .border(1.dp, if (isDarkMode) Color(0xFF1F202E) else Color(0xFFE2E8F0), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Live Typing Output", color = textMuted, fontSize = 9.sp)
-                                Text(
-                                    text = testInputText.ifBlank { "Type on keyboard below..." },
-                                    color = if (testInputText.isNotBlank()) textColor else textMuted,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (testInputText.isNotBlank()) {
-                                    IconButton(
-                                        onClick = {
-                                            testInputText = ""
-                                            lastComposedWord = ""
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = textMuted, modifier = Modifier.size(14.dp))
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            voiceTTSEngine.speak(testInputText, activeLanguage.ttsLocaleTag)
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "TTS Voice", tint = Color(0xFF6366F1), modifier = Modifier.size(15.dp))
-                                    }
-                                }
+                                Text("🪙 $cost • Unlock", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                             }
                         }
                     }
@@ -423,10 +397,7 @@ fun ThemesScreen(
                                         text = char,
                                         modifier = Modifier.weight(1f),
                                         height = 28.dp,
-                                        onClick = {
-                                            testInputText += char.lowercase()
-                                            lastComposedWord += char.lowercase()
-                                        }
+                                        onClick = {}
                                     )
                                 }
                             }
@@ -443,10 +414,7 @@ fun ThemesScreen(
                                         text = char,
                                         modifier = Modifier.weight(1f),
                                         height = 28.dp,
-                                        onClick = {
-                                            testInputText += char.lowercase()
-                                            lastComposedWord += char.lowercase()
-                                        }
+                                        onClick = {}
                                     )
                                 }
                                 Spacer(modifier = Modifier.weight(0.5f))
@@ -473,10 +441,7 @@ fun ThemesScreen(
                                         text = char,
                                         modifier = Modifier.weight(1f),
                                         height = 28.dp,
-                                        onClick = {
-                                            testInputText += char.lowercase()
-                                            lastComposedWord += char.lowercase()
-                                        }
+                                        onClick = {}
                                     )
                                 }
 
@@ -486,14 +451,7 @@ fun ThemesScreen(
                                     modifier = Modifier.weight(1.4f),
                                     isSpecial = true,
                                     height = 28.dp,
-                                    onClick = {
-                                        if (testInputText.isNotEmpty()) {
-                                            testInputText = testInputText.dropLast(1)
-                                        }
-                                        if (lastComposedWord.isNotEmpty()) {
-                                            lastComposedWord = lastComposedWord.dropLast(1)
-                                        }
-                                    }
+                                    onClick = {}
                                 )
                             }
 
@@ -524,17 +482,10 @@ fun ThemesScreen(
                                 // Space Bar
                                 PreviewKey(
                                     theme = previewingTheme,
-                                    text = "${previewingTheme.name} • Space",
+                                    text = "Space",
                                     modifier = Modifier.weight(4.7f),
                                     height = 28.dp,
-                                    onClick = {
-                                        val word = lastComposedWord.trim()
-                                        if (word.isNotBlank()) {
-                                            voiceTTSEngine.speakWord(word, activeLanguage.ttsLocaleTag)
-                                        }
-                                        testInputText += " "
-                                        lastComposedWord = ""
-                                    }
+                                    onClick = {}
                                 )
 
                                 // Send Action Key
@@ -545,56 +496,8 @@ fun ThemesScreen(
                                     isSpecial = true,
                                     isSelected = true,
                                     height = 28.dp,
-                                    onClick = {
-                                        if (testInputText.isNotBlank()) {
-                                            voiceTTSEngine.speak(testInputText, activeLanguage.ttsLocaleTag)
-                                        }
-                                    }
+                                    onClick = {}
                                 )
-                            }
-                        }
-                    }
-
-                    // Bottom Quick Shortcuts: Theme Store & Custom Builder
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isDarkMode) Color(0xFF1E1F2C) else Color(0xFFEEF2F6),
-                            border = BorderStroke(1.dp, if (isDarkMode) Color(0xFF2E3046) else Color(0xFFCBD5E1)),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { onNavigateToStore() }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(Icons.Default.Storefront, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text("Theme Store & Wallpapers", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textColor)
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isDarkMode) Color(0xFF1E1F2C) else Color(0xFFEEF2F6),
-                            border = BorderStroke(1.dp, if (isDarkMode) Color(0xFF2E3046) else Color(0xFFCBD5E1)),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { showCustomThemeDialog = true }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(Icons.Default.Tune, contentDescription = null, tint = Color(0xFFEC4899), modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text("Custom Studio", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textColor)
                             }
                         }
                     }
@@ -672,27 +575,16 @@ fun ThemesScreen(
                     }
                 }
 
-                // Grid Count & Tap Hint
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${filteredThemes.size} Themes Available",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = textMuted
-                    )
-                    Text(
-                        "Tap card to preview above ↑",
-                        fontSize = 10.5.sp,
-                        color = Color(0xFF818CF8),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                // Grid Count
+                Text(
+                    text = "${filteredThemes.size} Themes Available",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = textMuted,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
 
-                // 3D NEUMORPHISM THEME CARDS GRID
+                // 3D NEUMORPHISM THEME CARDS GRID (Optimized with keys & hardware acceleration)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
@@ -700,10 +592,14 @@ fun ThemesScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(filteredThemes) { theme ->
+                    items(
+                        items = filteredThemes,
+                        key = { it.id },
+                        contentType = { "theme_card" }
+                    ) { theme ->
                         val isSelected = currentTheme.id == theme.id
                         val isPreviewed = previewingTheme.id == theme.id
-                        val cost = getThemeCost(theme)
+                        val cost = remember(theme.id) { getThemeCost(theme) }
                         val isUnlocked = isThemeAvailable(theme)
 
                         NeumorphicThemeCard(
@@ -1029,6 +925,123 @@ fun ThemesScreen(
  * embedded miniature keyboard canvas, theme name, and price/status pill.
  */
 @Composable
+fun MiniKeyboardCanvas(
+    theme: KeyboardTheme,
+    modifier: Modifier = Modifier
+) {
+    val cornerRadiusDp = 10.dp
+    val bgGradient = theme.backgroundGradient
+    val bgColor = theme.backgroundColor
+    val keyColor = theme.keyColor.copy(alpha = theme.keyAlpha.coerceAtLeast(0.4f))
+    val keyBorderColor = theme.keyBorderColor.copy(alpha = 0.35f)
+    val spaceColor = theme.keySpecialColor.copy(alpha = 0.9f)
+    val accentColor = theme.accentColor.copy(alpha = 0.5f)
+
+    Canvas(
+        modifier = modifier.clip(RoundedCornerShape(cornerRadiusDp))
+    ) {
+        val w = size.width
+        val h = size.height
+        val crPx = cornerRadiusDp.toPx()
+
+        // 1. Draw Theme Background
+        if (bgGradient != null && bgGradient.size >= 2) {
+            drawRoundRect(
+                brush = Brush.verticalGradient(bgGradient),
+                cornerRadius = CornerRadius(crPx, crPx)
+            )
+        } else {
+            drawRoundRect(
+                color = bgColor,
+                cornerRadius = CornerRadius(crPx, crPx)
+            )
+        }
+
+        // Background Outer Rim Border
+        drawRoundRect(
+            color = keyBorderColor.copy(alpha = 0.25f),
+            cornerRadius = CornerRadius(crPx, crPx),
+            style = Stroke(width = 1.dp.toPx())
+        )
+
+        val paddingH = 6.dp.toPx()
+        val paddingV = 5.5.dp.toPx()
+        val availW = w - paddingH * 2
+        val availH = h - paddingV * 2
+
+        val rowSpacing = 3.dp.toPx()
+        val colSpacing = 2.5.dp.toPx()
+        val numRows = 3
+        val keyH = (availH - rowSpacing * (numRows - 1)) / numRows
+        val keyCorner = CornerRadius(3.5.dp.toPx(), 3.5.dp.toPx())
+
+        // Row 1: 5 Keys
+        val r1Count = 5
+        val r1KeyW = (availW - colSpacing * (r1Count - 1)) / r1Count
+        var y = paddingV
+        for (i in 0 until r1Count) {
+            val x = paddingH + i * (r1KeyW + colSpacing)
+            drawRoundRect(
+                color = keyColor,
+                topLeft = Offset(x, y),
+                size = Size(r1KeyW, keyH),
+                cornerRadius = keyCorner
+            )
+            drawRoundRect(
+                color = keyBorderColor,
+                topLeft = Offset(x, y),
+                size = Size(r1KeyW, keyH),
+                cornerRadius = keyCorner,
+                style = Stroke(width = 0.75.dp.toPx())
+            )
+        }
+
+        // Row 2: 4 Keys (Centered)
+        val r2Count = 4
+        val r2KeyW = (availW - colSpacing * (r2Count - 1)) / r2Count
+        y += keyH + rowSpacing
+        for (i in 0 until r2Count) {
+            val x = paddingH + i * (r2KeyW + colSpacing)
+            drawRoundRect(
+                color = keyColor,
+                topLeft = Offset(x, y),
+                size = Size(r2KeyW, keyH),
+                cornerRadius = keyCorner
+            )
+            drawRoundRect(
+                color = keyBorderColor,
+                topLeft = Offset(x, y),
+                size = Size(r2KeyW, keyH),
+                cornerRadius = keyCorner,
+                style = Stroke(width = 0.75.dp.toPx())
+            )
+        }
+
+        // Row 3: Spacebar (Centered, width ~ 65% of available width)
+        y += keyH + rowSpacing
+        val spaceW = availW * 0.65f
+        val spaceX = paddingH + (availW - spaceW) / 2f
+        drawRoundRect(
+            color = spaceColor,
+            topLeft = Offset(spaceX, y),
+            size = Size(spaceW, keyH),
+            cornerRadius = keyCorner
+        )
+        drawRoundRect(
+            color = accentColor,
+            topLeft = Offset(spaceX, y),
+            size = Size(spaceW, keyH),
+            cornerRadius = keyCorner,
+            style = Stroke(width = 0.75.dp.toPx())
+        )
+    }
+}
+
+/**
+ * High-performance 3D Neumorphism Theme Card for the gallery.
+ * Optimized for silky-smooth 60/120 FPS scrolling with hardware Canvas rendering and remembered objects.
+ */
+@Composable
 fun NeumorphicThemeCard(
     theme: KeyboardTheme,
     isSelected: Boolean,
@@ -1040,38 +1053,30 @@ fun NeumorphicThemeCard(
     onApply: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardShape = RoundedCornerShape(16.dp)
+    val cardShape = remember { RoundedCornerShape(16.dp) }
 
-    // Dual shadows for 3D Neumorphism
-    val shadowDark = if (isDarkMode) Color(0xCC000000) else Color(0x2E403426)
-    val shadowLight = if (isDarkMode) Color(0x18FFFFFF) else Color(0xD0FFFFFF)
-
-    val surfaceBrush = if (isDarkMode) {
-        Brush.linearGradient(
-            colors = listOf(Color(0xFF23252E), Color(0xFF17181D)),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-        )
-    } else {
-        Brush.linearGradient(
-            colors = listOf(Color(0xFFF9F7F3), Color(0xFFE9E5DC)),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
-        )
+    val surfaceBrush = remember(isDarkMode) {
+        if (isDarkMode) {
+            Brush.linearGradient(listOf(Color(0xFF22242E), Color(0xFF16171D)))
+        } else {
+            Brush.linearGradient(listOf(Color(0xFFFAF8F5), Color(0xFFEBE7DF)))
+        }
     }
 
-    val rimBorder = BorderStroke(
-        width = if (isSelected) 2.dp else if (isPreviewed) 1.5.dp else 1.dp,
-        color = if (isSelected) Color(0xFF10B981)
-        else if (isPreviewed) Color(0xFF6366F1)
-        else if (isDarkMode) Color.White.copy(alpha = 0.12f)
-        else Color.White.copy(alpha = 0.85f)
-    )
+    val rimBorder = remember(isSelected, isPreviewed, isDarkMode) {
+        BorderStroke(
+            width = if (isSelected) 2.dp else if (isPreviewed) 1.5.dp else 1.dp,
+            color = if (isSelected) Color(0xFF10B981)
+            else if (isPreviewed) Color(0xFF6366F1)
+            else if (isDarkMode) Color.White.copy(alpha = 0.10f)
+            else Color.Black.copy(alpha = 0.08f)
+        )
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = if (isSelected) 8.dp else 5.dp, shape = cardShape, ambientColor = shadowLight, spotColor = shadowDark)
+            .shadow(elevation = if (isSelected) 4.dp else 1.5.dp, shape = cardShape)
             .clip(cardShape)
             .background(surfaceBrush)
             .border(rimBorder, cardShape)
@@ -1082,164 +1087,87 @@ fun NeumorphicThemeCard(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Embedded Theme Visual Mini Canvas
-            val themeBg = if (theme.backgroundGradient != null) {
-                Modifier.background(Brush.verticalGradient(theme.backgroundGradient!!))
-            } else {
-                Modifier.background(theme.backgroundColor)
-            }
-
-            Box(
+            // Hardware-accelerated mini keyboard canvas (0 layout overhead, silky smooth 60/120 FPS)
+            MiniKeyboardCanvas(
+                theme = theme,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .then(themeBg)
-                    .border(0.8.dp, theme.keyBorderColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                    .padding(5.dp)
-            ) {
-                // Miniature Key Rows to show real theme aesthetic
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        listOf("Q", "W", "E", "R", "T").forEach { letter ->
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(13.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(theme.keyColor.copy(alpha = theme.keyAlpha))
-                                    .border(0.5.dp, theme.keyBorderColor.copy(alpha = 0.4f), RoundedCornerShape(3.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(letter, color = theme.textColor, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
+                    .height(72.dp)
+            )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        listOf("A", "S", "D", "F").forEach { letter ->
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(13.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(theme.keyColor.copy(alpha = theme.keyAlpha))
-                                    .border(0.5.dp, theme.keyBorderColor.copy(alpha = 0.4f), RoundedCornerShape(3.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(letter, color = theme.textColor, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
+            // Theme Name (Clean, without tags or emojis)
+            Text(
+                text = theme.name,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDarkMode) Color(0xFFF1F5F9) else Color(0xFF1E2024),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
 
-                    // Mini Space bar
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.7f)
-                            .height(11.dp)
-                            .align(Alignment.CenterHorizontally)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(theme.keySpecialColor.copy(alpha = 0.9f))
-                            .border(0.5.dp, theme.accentColor.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
-                    )
-                }
-
-                // Top Badge on Preview (Active / Preview / VIP)
-                if (isSelected) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFF10B981),
-                        modifier = Modifier.align(Alignment.TopEnd)
-                    ) {
-                        Text(
-                            "ACTIVE",
-                            color = Color.White,
-                            fontSize = 7.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                } else if (isPreviewed) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFF6366F1),
-                        modifier = Modifier.align(Alignment.TopEnd)
-                    ) {
-                        Text(
-                            "PREVIEWING",
-                            color = Color.White,
-                            fontSize = 7.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                }
-            }
-
-            // Theme Name & Subtitle
-            Column {
-                Text(
-                    text = theme.name,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDarkMode) Color(0xFFF1F5F9) else Color(0xFF1E2024),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${theme.themeStyle.iconEmoji} ${theme.themeStyle.displayName}",
-                    fontSize = 10.sp,
-                    color = if (isDarkMode) Color(0xFF9195A2) else Color(0xFF6B6E76),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Status / Price / Apply Bar (3D Neumorphic Button)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Price / Status Label
-                if (isSelected) {
-                    Text("Applied ✓", color = Color(0xFF10B981), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                } else if (isUnlocked) {
-                    Text("Free", color = Color(0xFF10B981), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Text("🪙 $cost", color = Color(0xFFEAB308), fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
-                }
-
-                // Action Pill
+            // Status / Action Bar
+            if (isSelected) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) Color(0xFF10B981).copy(alpha = 0.2f)
-                    else if (isUnlocked) Color(0xFF6366F1).copy(alpha = 0.2f)
-                    else Color(0xFFEAB308).copy(alpha = 0.2f),
-                    border = BorderStroke(
-                        0.8.dp,
-                        if (isSelected) Color(0xFF10B981)
-                        else if (isUnlocked) Color(0xFF6366F1)
-                        else Color(0xFFEAB308)
-                    ),
-                    modifier = Modifier.clickable { onApply() }
+                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFF10B981)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = if (isSelected) "Active" else if (isUnlocked) "Apply" else "Unlock",
-                        color = if (isSelected) Color(0xFF10B981) else if (isUnlocked) Color(0xFF818CF8) else Color(0xFFEAB308),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Active",
+                            color = Color(0xFF10B981),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isUnlocked) {
+                        Text(
+                            "Free",
+                            color = Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text(
+                            "🪙 $cost",
+                            color = Color(0xFFEAB308),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isUnlocked) Color(0xFF6366F1) else Color(0xFFEAB308),
+                        modifier = Modifier.clickable { onApply() }
+                    ) {
+                        Text(
+                            text = if (isUnlocked) "Apply" else "Unlock",
+                            color = if (isUnlocked) Color.White else Color.Black,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
         }

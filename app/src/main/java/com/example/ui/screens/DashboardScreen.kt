@@ -402,8 +402,8 @@ fun HomeTab(
                 )
                 DashboardFeatureCard(
                     icon = Icons.Default.AutoAwesome,
-                    title = "AI Writing",
-                    desc = "Tone, Grammar & Rewrites",
+                    title = if (isPremiumUser) "AI Assistant" else "AI Assistant 👑",
+                    desc = if (isPremiumUser) "Chat, Grammar & Emails" else "VIP Exclusive • Chat & Emails",
                     isDarkMode = isDarkMode,
                     onClick = onNavigateToAISettings,
                     modifier = Modifier.weight(1f)
@@ -444,8 +444,8 @@ fun HomeTab(
             )
         }
 
-        // 3. Real Google AdMob Live Banner (Official Google Test Ad Unit - Real-time loading)
-        RealAdMobBanner(isDarkMode = isDarkMode)
+        // 3. Real Google AdMob Live Banner (Official Google Test Ad Unit - Disabled for VIP subscribers)
+        RealAdMobBanner(isDarkMode = isDarkMode, isPremium = isPremiumUser)
 
         // 4. Spin & Win Free AI Credits Card (3D Neumorphic Physical Wheel Card)
         val spinTextColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
@@ -923,6 +923,10 @@ fun ProVipTab(
     val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
     val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
 
+    val isSignedIn by preferences.isSignedIn.collectAsState()
+    val userEmail by preferences.userEmail.collectAsState()
+    var showSignInSheet by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1044,8 +1048,15 @@ fun ProVipTab(
         // 3. 3D Action Button
         Button(
             onClick = {
-                preferences.activatePro()
-                Toast.makeText(context, "🎉 Welcome to VIP PRO! All features unlocked successfully.", Toast.LENGTH_LONG).show()
+                if (!isSignedIn && !isPremiumUser) {
+                    showSignInSheet = true
+                } else if (!isPremiumUser) {
+                    preferences.activatePro()
+                    preferences.syncCreditsToCloud()
+                    Toast.makeText(context, "🎉 Welcome to VIP PRO! Bound to $userEmail.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "VIP PRO is already active.", Toast.LENGTH_SHORT).show()
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -1098,8 +1109,9 @@ fun ProVipTab(
         ) {
             TextButton(
                 onClick = {
-                    preferences.restorePurchases()
-                    Toast.makeText(context, "Purchases restored successfully!", Toast.LENGTH_SHORT).show()
+                    preferences.restorePurchases { success, msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
                 }
             ) {
                 Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp), tint = textMuted)
@@ -1107,6 +1119,20 @@ fun ProVipTab(
                 Text("Restore Purchases", color = textMuted, fontSize = 12.sp)
             }
         }
+    }
+
+    if (showSignInSheet) {
+        GoogleSignInBottomSheet(
+            preferences = preferences,
+            reason = SignInTriggerReason.UPGRADE_PRO,
+            onDismiss = { showSignInSheet = false },
+            onSignInSuccess = {
+                showSignInSheet = false
+                preferences.activatePro()
+                preferences.syncCreditsToCloud()
+                Toast.makeText(context, "👑 VIP Pro Activated for ${preferences.userEmail.value}!", Toast.LENGTH_LONG).show()
+            }
+        )
     }
 }
 
@@ -1480,6 +1506,12 @@ fun SettingsTab(
     var showTypingDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
 
+    val isSignedIn by preferences.isSignedIn.collectAsState()
+    val userEmail by preferences.userEmail.collectAsState()
+    val userDisplayName by preferences.userDisplayName.collectAsState()
+    val aiCredits by preferences.aiCredits.collectAsState()
+    var showSignInSheet by remember { mutableStateOf(false) }
+
     val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
     val textMuted = if (isDarkMode) NeumorphicColors.DarkTextMuted else NeumorphicColors.LightTextMuted
     val dividerColor = if (isDarkMode) Color(0x18FFFFFF) else Color(0x12000000)
@@ -1578,6 +1610,150 @@ fun SettingsTab(
                         tint = if (isDarkMode) Color(0xFFFBBF24) else Color(0xFF475569),
                         modifier = Modifier.size(20.dp)
                     )
+                }
+            }
+        }
+
+        // GOOGLE ACCOUNT & CLOUD SYNC CARD
+        NeumorphicCard(
+            modifier = Modifier.fillMaxWidth(),
+            isDarkMode = isDarkMode,
+            cornerRadius = 18.dp,
+            elevation = 7.dp
+        ) {
+            if (isSignedIn) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10B981)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    userDisplayName.firstOrNull()?.uppercase() ?: "G",
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 18.sp
+                                )
+                            }
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        userDisplayName.ifEmpty { "Google Account" },
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp,
+                                        color = textColor
+                                    )
+                                    Icon(
+                                        Icons.Default.Verified,
+                                        contentDescription = "Verified",
+                                        tint = Color(0xFF10B981),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                                Text(
+                                    userEmail,
+                                    fontSize = 11.5.sp,
+                                    color = textMuted
+                                )
+                            }
+                        }
+
+                        // Subtle Sign Out Button
+                        TextButton(
+                            onClick = {
+                                preferences.signOutGoogle()
+                                Toast.makeText(context, "Signed out of Google Account", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Text("Sign Out", color = textMuted, fontSize = 11.5.sp)
+                        }
+                    }
+
+                    // Cloud Sync Stats Row
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isDarkMode) Color(0xFF161F1B) else Color(0xFFECFDF5),
+                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                                Text("Cloud Credits: $aiCredits", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF10B981))
+                            }
+                            Text("Real-Time Synced", fontSize = 10.5.sp, color = textMuted)
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(if (isDarkMode) Color(0xFF262B3D) else Color(0xFFE2E8F0)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GoogleLogoIcon(modifier = Modifier.size(22.dp))
+                        }
+                        Column {
+                            Text(
+                                "Sign in with Google",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = textColor
+                            )
+                            Text(
+                                "Save your credits & Pro status across all your devices",
+                                fontSize = 11.sp,
+                                color = textMuted,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { showSignInSheet = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text("SIGN IN", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
                 }
             }
         }
@@ -1681,11 +1857,28 @@ fun SettingsTab(
                     color = dividerColor
                 )
 
-                // 6. AI & Smart Reply
+                // 6. AI Writing Assistant
                 NeumorphicSettingsItem(
                     icon = Icons.Default.AutoAwesome,
-                    title = "AI & Smart Reply",
-                    subtitle = "Contextual replies, tones & rewrite tools",
+                    title = "AI Writing Assistant",
+                    subtitle = if (isPremiumUser) "Chat, grammar checker, emails & summaries" else "VIP Exclusive • Chat, Grammar & Emails",
+                    isDarkMode = isDarkMode,
+                    trailingBadge = if (isPremiumUser) "VIP Active" else "VIP Only",
+                    badgeColor = Color(0xFFF59E0B),
+                    onClick = onNavigateToAISettings
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                    thickness = 0.8.dp,
+                    color = dividerColor
+                )
+
+                // 7. Smart Reply
+                NeumorphicSettingsItem(
+                    icon = Icons.Default.Forum,
+                    title = "Smart Reply",
+                    subtitle = "Contextual replies & incoming message suggestions",
                     isDarkMode = isDarkMode,
                     onClick = onNavigateToSmartReply
                 )
@@ -2181,6 +2374,15 @@ fun SettingsTab(
                 }
             },
             containerColor = if (isDarkMode) NeumorphicColors.DarkCardTop else NeumorphicColors.LightCardTop
+        )
+    }
+
+    if (showSignInSheet) {
+        GoogleSignInBottomSheet(
+            preferences = preferences,
+            reason = SignInTriggerReason.GENERAL,
+            onDismiss = { showSignInSheet = false },
+            onSignInSuccess = { showSignInSheet = false }
         )
     }
 }

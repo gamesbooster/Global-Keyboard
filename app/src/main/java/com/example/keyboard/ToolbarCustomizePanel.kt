@@ -41,21 +41,23 @@ data class ToolDefinition(
 
 object ToolbarToolRegistry {
     val DEFAULT_TOOLBAR = listOf(
-        "translate",
+        "lang_selector",
         "smart_reply",
         "ai",
         "tools",
-        "voice",
         "stickers",
-        "settings"
+        "settings",
+        "clipboard",
+        "themes",
+        "voice"
     )
 
     val ALL_TOOLS = listOf(
         ToolDefinition("translate", "Translate", Icons.Default.Translate, "Real-time multilingual translation", Color(0xFF3B82F6)),
         ToolDefinition("smart_reply", "Smart Reply", Icons.Default.AutoAwesome, "Instant AI reply suggestions", Color(0xFF6366F1)),
-        ToolDefinition("ai", "Gemini AI", Icons.Default.AutoAwesome, "AI writing assistant & tone changer", Color(0xFFEC4899)),
+        ToolDefinition("ai", "AI", Icons.Default.AutoAwesome, "AI writing assistant & tone changer", Color(0xFFEC4899)),
         ToolDefinition("tools", "Tools", Icons.Default.Widgets, "All utilities & keyboard drawers", Color(0xFFF59E0B)),
-        ToolDefinition("voice", "Voice Mic", Icons.Default.Mic, "Speech-to-text typing", Color(0xFF10B981)),
+        ToolDefinition("voice", "Voice", Icons.Default.Mic, "Speech-to-text typing", Color(0xFF10B981)),
         ToolDefinition("stickers", "Templates", Icons.Default.Celebration, "Viral memes, festival & card templates", Color(0xFF8B5CF6)),
         ToolDefinition("settings", "Settings", Icons.Default.Settings, "Vibration, themes & preferences", Color(0xFF64748B)),
         ToolDefinition("lang_selector", "Language Pill", Icons.Default.Language, "Auto / EN ⇄ HI quick selector", Color(0xFF0EA5E9)),
@@ -63,7 +65,8 @@ object ToolbarToolRegistry {
         ToolDefinition("clipboard", "Clipboard", Icons.Default.ContentPaste, "Multi-paste & copied snippets", Color(0xFF06B6D4)),
         ToolDefinition("emoji", "Emoji", Icons.Default.SentimentSatisfied, "Emoji keyboard picker", Color(0xFFEAB308)),
         ToolDefinition("themes", "Themes", Icons.Default.Palette, "Keyboards styles & customizer", Color(0xFF8B5CF6)),
-        ToolDefinition("languages", "Languages", Icons.Default.Language, "Quick switch input languages", Color(0xFF14B8A6))
+        ToolDefinition("languages", "Languages", Icons.Default.Language, "Quick switch input languages", Color(0xFF14B8A6)),
+        ToolDefinition("numpad", "Number Pad", Icons.Default.Dialpad, "Dedicated 3x4 PIN & calculator pad", Color(0xFF0D9488))
     )
 }
 

@@ -41,56 +41,57 @@ data class LanguageScreenItem(
     val id: String,
     val langId: String,
     val title: String,
+    val flagEmoji: String,
     val isPhonetic: Boolean = false,
     val isGlobal: Boolean = false
 )
 
 val ALL_LANGUAGE_SCREEN_ITEMS = listOf(
     // 1. Primary & Indic languages with Phonetic options (matching design specification)
-    LanguageScreenItem("en", "en", "English (India)", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("hi_phonetic", "hi", "Hindi Phonetic/हिन्दी (A → अ)", isPhonetic = true, isGlobal = false),
-    LanguageScreenItem("hi", "hi", "Hindi/हिन्दी", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("hinglish", "hi", "Hinglish", isPhonetic = true, isGlobal = false),
-    LanguageScreenItem("bn", "bn", "Bengali/বাংলা", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("bn_phonetic", "bn", "Bengali Phonetic/বাংলা (A → অ)", isPhonetic = true, isGlobal = false),
-    LanguageScreenItem("te", "te", "Telugu/తెలుగు", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("te_phonetic", "te", "Telugu Phonetic/తెలుగు (A → త)", isPhonetic = true, isGlobal = false),
-    LanguageScreenItem("mr", "mr", "Marathi/मराठी", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("mr_phonetic", "mr", "Marathi Phonetic/मराठी (A → अ)", isPhonetic = true, isGlobal = false),
-    LanguageScreenItem("ta", "ta", "Tamil/தமிழ்", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("ta_phonetic", "ta", "Tamil Phonetic/தமிழ் (A → அ)", isPhonetic = true, isGlobal = false),
-    LanguageScreenItem("gu", "gu", "Gujarati/ગુજરાતી", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("gu_phonetic", "gu", "Gujarati Phonetic/ગુજરાતી (A → અ)", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("en", "en", "English", "🇺🇸", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("hi_phonetic", "hi", "Hindi Phonetic/हिन्दी (A → अ)", "🇮🇳", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("hi", "hi", "Hindi/हिन्दी", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("hinglish", "hi", "Hinglish", "🇮🇳", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("bn", "bn", "Bengali/বাংলা", "🇧🇩", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("bn_phonetic", "bn", "Bengali Phonetic/বাংলা (A → অ)", "🇧🇩", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("te", "te", "Telugu/తెలుగు", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("te_phonetic", "te", "Telugu Phonetic/తెలుగు (A → త)", "🇮🇳", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("mr", "mr", "Marathi/मराठी", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("mr_phonetic", "mr", "Marathi Phonetic/मराठी (A → अ)", "🇮🇳", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("ta", "ta", "Tamil/தமிழ்", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("ta_phonetic", "ta", "Tamil Phonetic/தமிழ் (A → அ)", "🇮🇳", isPhonetic = true, isGlobal = false),
+    LanguageScreenItem("gu", "gu", "Gujarati/ગુજરાતી", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("gu_phonetic", "gu", "Gujarati Phonetic/ગુજરાતી (A → अ)", "🇮🇳", isPhonetic = true, isGlobal = false),
 
     // 2. Global & World Languages
-    LanguageScreenItem("es", "es", "Spanish/Español", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("fr", "fr", "French/Français", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("de", "de", "German/Deutsch", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("ar", "ar", "Arabic/العربية", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("pt", "pt", "Portuguese/Português", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("ru", "ru", "Russian/Русский", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("it", "it", "Italian/Italiano", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("ja", "ja", "Japanese/日本語", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("ko", "ko", "Korean/한국어", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("zh", "zh", "Chinese/中文 (简体)", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("tr", "tr", "Turkish/Türkçe", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("id", "id", "Indonesian/Bahasa Indonesia", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("vi", "vi", "Vietnamese/Tiếng Việt", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("nl", "nl", "Dutch/Nederlands", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("pl", "pl", "Polish/Polski", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("th", "th", "Thai/ไทย", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("fa", "fa", "Persian/فارسی", isPhonetic = false, isGlobal = true),
-    LanguageScreenItem("fil", "fil", "Filipino/Tagalog", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("es", "es", "Spanish/Español", "🇪🇸", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("fr", "fr", "French/Français", "🇫🇷", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("de", "de", "German/Deutsch", "🇩🇪", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("ar", "ar", "Arabic/العربية", "🇸🇦", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("pt", "pt", "Portuguese/Português", "🇧🇷", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("ru", "ru", "Russian/Русский", "🇷🇺", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("it", "it", "Italian/Italiano", "🇮🇹", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("ja", "ja", "Japanese/日本語", "🇯🇵", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("ko", "ko", "Korean/한국어", "🇰🇷", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("zh", "zh", "Chinese/中文 (简体)", "🇨🇳", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("tr", "tr", "Turkish/Türkçe", "🇹🇷", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("id", "id", "Indonesian/Bahasa Indonesia", "🇮🇩", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("vi", "vi", "Vietnamese/Tiếng Việt", "🇻🇳", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("nl", "nl", "Dutch/Nederlands", "🇳🇱", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("pl", "pl", "Polish/Polski", "🇵🇱", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("th", "th", "Thai/ไทย", "🇹🇭", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("fa", "fa", "Persian/فارسی", "🇮🇷", isPhonetic = false, isGlobal = true),
+    LanguageScreenItem("fil", "fil", "Filipino/Tagalog", "🇵🇭", isPhonetic = false, isGlobal = true),
 
     // 3. Other Regional Indian Languages
-    LanguageScreenItem("kn", "kn", "Kannada/ಕನ್ನಡ", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("ml", "ml", "Malayalam/മലയാളം", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("pa", "pa", "Punjabi/ਪੰਜਾਬੀ", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("ur", "ur", "Urdu/اردو", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("sa", "sa", "Sanskrit/संस्कृतम्", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("ne", "ne", "Nepali/नेपाली", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("or", "or", "Odia/ଓଡ଼ିଆ", isPhonetic = false, isGlobal = false),
-    LanguageScreenItem("as", "as", "Assamese/অসমীয়া", isPhonetic = false, isGlobal = false)
+    LanguageScreenItem("kn", "kn", "Kannada/ಕನ್ನಡ", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("ml", "ml", "Malayalam/മലയാളം", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("pa", "pa", "Punjabi/ਪੰਜਾਬੀ", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("ur", "ur", "Urdu/اردو", "🇵🇰", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("sa", "sa", "Sanskrit/संस्कृतम्", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("ne", "ne", "Nepali/नेपाली", "🇳🇵", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("or", "or", "Odia/ଓଡ଼ିଆ", "🇮🇳", isPhonetic = false, isGlobal = false),
+    LanguageScreenItem("as", "as", "Assamese/অসমীয়া", "🇮🇳", isPhonetic = false, isGlobal = false)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -404,12 +405,22 @@ fun LanguagesScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = item.title,
-                                    fontSize = 14.5.sp,
-                                    color = textColor,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = item.flagEmoji,
+                                        fontSize = 18.sp
+                                    )
+                                    Text(
+                                        text = item.title,
+                                        fontSize = 14.sp,
+                                        color = textColor,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                }
 
                                 RoundCheckbox(
                                     isSelected = isSelected,

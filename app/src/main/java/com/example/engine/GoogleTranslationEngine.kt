@@ -112,10 +112,20 @@ object GoogleTranslationEngine {
     suspend fun translate(text: String, sourceLang: String, targetLang: String): String = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext text
         val clean = text.trim()
-        val sl = if (sourceLang.equals("auto", ignoreCase = true)) "auto" else sourceLang.lowercase()
-        val tl = targetLang.lowercase()
+        val isTargetHinglish = targetLang.equals("hinglish", ignoreCase = true)
+        val isSourceHinglish = sourceLang.equals("hinglish", ignoreCase = true)
 
-        if (sl != "auto" && sl == tl) return@withContext clean
+        val sl = when {
+            isSourceHinglish -> "auto"
+            sourceLang.equals("auto", ignoreCase = true) -> "auto"
+            else -> sourceLang.lowercase()
+        }
+        val tl = when {
+            isTargetHinglish -> "hi"
+            else -> targetLang.lowercase()
+        }
+
+        if (sl != "auto" && sl == tl && !isTargetHinglish) return@withContext clean
 
         val key = cacheKey(clean, sl, tl)
         val cached = translationCache[key]
