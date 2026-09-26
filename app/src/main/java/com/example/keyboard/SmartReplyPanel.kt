@@ -1413,45 +1413,66 @@ fun SmartReplyPanel(
             }
         }
 
-        // Privacy dialog
+        // Privacy overlay (In-panel non-dialog overlay: 100% safe in InputMethodService)
         if (showPrivacyDialog) {
-            AlertDialog(
-                onDismissRequest = { showPrivacyDialog = false },
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .clickable { showPrivacyDialog = false }
+                    .padding(12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = theme.surfaceColor,
+                    border = BorderStroke(1.dp, theme.accentColor.copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = false) {}
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = theme.accentColor)
-                        Text("Smart Reply Privacy Protection", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Shield, contentDescription = null, tint = theme.accentColor)
+                            Text("Smart Reply Privacy Protection", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = theme.textColor)
+                        }
                         Text(
                             "• Zero Background Scraping: Smart Reply NEVER continuously reads or scans your screen.",
-                            fontSize = 12.sp
+                            fontSize = 11.5.sp,
+                            color = theme.textColor
                         )
                         Text(
                             "• User Initiated Only: Text is analyzed only when you explicitly paste or type into the Smart Reply box and tap Generate.",
-                            fontSize = 12.sp
+                            fontSize = 11.5.sp,
+                            color = theme.textColor
                         )
                         Text(
                             "• Sensitive Fields Blocked: Disabled automatically in password, PIN, and credential input fields.",
-                            fontSize = 12.sp
+                            fontSize = 11.5.sp,
+                            color = theme.textColor
                         )
                         Text(
                             "• Secure Inference: Analyzed via encrypted direct connection with prompt injection defense and strict safety filtering.",
-                            fontSize = 12.sp
+                            fontSize = 11.5.sp,
+                            color = theme.textColor
                         )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showPrivacyDialog = false }) {
-                        Text("Got it", color = theme.primaryColor, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showPrivacyDialog = false }) {
+                                Text("Got it", color = theme.primaryColor, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
-            )
+            }
         }
     }
 }

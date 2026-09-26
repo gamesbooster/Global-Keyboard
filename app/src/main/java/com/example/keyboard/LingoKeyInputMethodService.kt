@@ -1,16 +1,21 @@
 package com.example.keyboard
 
+import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
-import android.text.InputType
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.text.InputType
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -18,6 +23,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.*
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
@@ -30,8 +36,16 @@ import com.example.data.ClipboardRepository
 import com.example.data.LingoKeyPreferences
 import com.example.engine.AIProvider
 import com.example.engine.GeminiAIProvider
+import com.example.engine.GoogleTranslationEngine
 import com.example.engine.SmartAIProvider
 import com.example.engine.VoiceTTSEngine
+import com.example.model.Language
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
@@ -59,11 +73,25 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
     private var onVoiceStatusUpdate: ((VoiceTypingStatus, Float, String) -> Unit)? = null
     private var lastPartialTextLength: Int = 0
     private var isVoiceSessionActive: Boolean = false
+    private var isSpeechDirectCommit: Boolean = true
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var activeSpeechSourceLang: String? = null
+    private var activeSpeechTargetLang: String? = null
+    private var isSpeechLiveTranslate: Boolean = false
+    private var currentVoiceStatus: VoiceTypingStatus = VoiceTypingStatus.IDLE
     private val mainHandler = Handler(Looper.getMainLooper())
     private val accumulatedSpeechText = StringBuilder()
     private val restartListeningRunnable = Runnable {
         if (isVoiceSessionActive) {
             launchSpeechRecognizerInternal()
+        }
+    }
+    private val connectingTimeoutRunnable = Runnable {
+        if (isVoiceSessionActive && currentVoiceStatus == VoiceTypingStatus.CONNECTING) {
+            Log.w("LingoKey", "Microphone connection timed out, restarting listener...")
+            if (isVoiceSessionActive) {
+                launchSpeechRecognizerInternal()
+            }
         }
     }
 
@@ -169,8 +197,8 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
                     onOpenThemesStore = {
                         openSettingsActivity("themes")
                     },
-                    onStartSpeechRecognition = {
-                        startSpeechRecognition()
+                    onStartSpeechRecognition = { sourceLang, targetLang, liveTranslate, directCommit ->
+                        startSpeechRecognition(sourceLang, targetLang, liveTranslate, directCommit)
                     },
                     onStopSpeechRecognition = {
                         stopSpeechRecognition()
@@ -234,6 +262,7 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
 
     override fun onDestroy() {
         super.onDestroy()
+        serviceScope.cancel()
         try {
             clipChangedListener.let { clipboardManager?.removePrimaryClipChangedListener(it) }
         } catch (e: Exception) {
@@ -388,11 +417,37 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         }
     }
 
-    private fun startSpeechRecognition() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            onVoiceStatusUpdate?.invoke(VoiceTypingStatus.ERROR, 0f, "Voice typing is not supported on this system")
+    private fun startSpeechRecognition(
+        sourceLang: String? = null,
+        targetLang: String? = null,
+        liveTranslate: Boolean = false,
+        directCommit: Boolean = true
+    ) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            currentVoiceStatus = VoiceTypingStatus.ERROR
+            onVoiceStatusUpdate?.invoke(VoiceTypingStatus.ERROR, 0f, "Microphone permission required")
+            try {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                openSettingsActivity("voice_settings")
+            }
             return
         }
+
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            currentVoiceStatus = VoiceTypingStatus.ERROR
+            onVoiceStatusUpdate?.invoke(VoiceTypingStatus.ERROR, 0f, "Voice typing is not supported on this device")
+            return
+        }
+
+        activeSpeechSourceLang = sourceLang
+        activeSpeechTargetLang = targetLang
+        isSpeechLiveTranslate = liveTranslate
+        isSpeechDirectCommit = directCommit
 
         isVoiceSessionActive = true
         accumulatedSpeechText.clear()
@@ -403,6 +458,7 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         if (!isVoiceSessionActive) return
 
         mainHandler.removeCallbacks(restartListeningRunnable)
+        mainHandler.removeCallbacks(connectingTimeoutRunnable)
         lastPartialTextLength = 0
 
         try {
@@ -415,7 +471,10 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
         }
 
         try {
+            currentVoiceStatus = VoiceTypingStatus.CONNECTING
             onVoiceStatusUpdate?.invoke(VoiceTypingStatus.CONNECTING, 0f, "Connecting microphone...")
+            // Watchdog timer: prevent infinite "Connecting microphone..." hang
+            mainHandler.postDelayed(connectingTimeoutRunnable, 4500L)
 
             val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
             speechRecognizer = recognizer
@@ -423,7 +482,15 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     if (!isVoiceSessionActive) return
-                    val displayText = if (accumulatedSpeechText.isNotEmpty()) accumulatedSpeechText.toString() else "Listening... Speak now"
+                    mainHandler.removeCallbacks(connectingTimeoutRunnable)
+                    currentVoiceStatus = VoiceTypingStatus.LISTENING
+                    val displayText = if (accumulatedSpeechText.isNotEmpty()) {
+                        accumulatedSpeechText.toString()
+                    } else if (isSpeechLiveTranslate) {
+                        "Listening... Spoken words will be translated live"
+                    } else {
+                        "Listening... Speak now"
+                    }
                     onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.2f, displayText)
                 }
 
@@ -447,6 +514,7 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
 
                 override fun onError(error: Int) {
                     if (!isVoiceSessionActive) return
+                    mainHandler.removeCallbacks(connectingTimeoutRunnable)
 
                     // If it is speech timeout, no match, or recognizer busy, seamlessly restart to keep voice typing continuous like Gboard
                     if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
@@ -470,35 +538,56 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
                         SpeechRecognizer.ERROR_SERVER -> "Voice server error"
                         else -> "Voice recognition stopped (Code: $error)"
                     }
+                    currentVoiceStatus = VoiceTypingStatus.ERROR
                     onVoiceStatusUpdate?.invoke(VoiceTypingStatus.ERROR, 0f, message)
                     isVoiceSessionActive = false
                     lastPartialTextLength = 0
                 }
 
                 override fun onResults(results: Bundle?) {
+                    mainHandler.removeCallbacks(connectingTimeoutRunnable)
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val phraseText = matches?.firstOrNull()?.trim()
 
                     if (!phraseText.isNullOrBlank()) {
-                        // Replace the last stream partial chunk with the finalized sentence chunk
-                        if (lastPartialTextLength > 0) {
-                            deleteSurroundingTextSafe(lastPartialTextLength, 0)
+                        if (isSpeechLiveTranslate && !activeSpeechTargetLang.isNullOrBlank()) {
+                            val src = activeSpeechSourceLang ?: "auto"
+                            val tgt = activeSpeechTargetLang ?: "en"
+                            serviceScope.launch {
+                                val translated = GoogleTranslationEngine.translate(phraseText, src, tgt)
+                                withContext(Dispatchers.Main) {
+                                    if (isSpeechDirectCommit) {
+                                        if (lastPartialTextLength > 0) {
+                                            deleteSurroundingTextSafe(lastPartialTextLength, 0)
+                                            lastPartialTextLength = 0
+                                        }
+                                        commitTextSafe("$translated ")
+                                    }
+                                    onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.3f, "$phraseText ➔ $translated")
+                                }
+                            }
+                        } else {
+                            if (isSpeechDirectCommit) {
+                                if (lastPartialTextLength > 0) {
+                                    deleteSurroundingTextSafe(lastPartialTextLength, 0)
+                                    lastPartialTextLength = 0
+                                }
+                                commitTextSafe("$phraseText ")
+                            }
+                            if (accumulatedSpeechText.isNotEmpty()) {
+                                accumulatedSpeechText.append(" ")
+                            }
+                            accumulatedSpeechText.append(phraseText)
+                            onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.3f, accumulatedSpeechText.toString())
                         }
-                        commitTextSafe("$phraseText ")
-
-                        if (accumulatedSpeechText.isNotEmpty()) {
-                            accumulatedSpeechText.append(" ")
-                        }
-                        accumulatedSpeechText.append(phraseText)
-                        val fullSummary = accumulatedSpeechText.toString()
-                        onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.3f, fullSummary)
                     }
                     lastPartialTextLength = 0
 
                     // Continuously resume listening if voice session is active (continuous voice typing)
                     if (isVoiceSessionActive) {
-                        mainHandler.postDelayed(restartListeningRunnable, 100)
+                        mainHandler.postDelayed(restartListeningRunnable, 150)
                     } else {
+                        currentVoiceStatus = VoiceTypingStatus.IDLE
                         onVoiceStatusUpdate?.invoke(VoiceTypingStatus.IDLE, 0f, accumulatedSpeechText.toString())
                     }
                 }
@@ -506,35 +595,57 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
                 override fun onPartialResults(partialResults: Bundle?) {
                     if (!isVoiceSessionActive) return
                     val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val partialText = matches?.firstOrNull()
+                    val partialText = matches?.firstOrNull()?.trim()
                     if (!partialText.isNullOrBlank()) {
-                        // Real-time Gboard style streaming into the text field:
-                        if (lastPartialTextLength > 0) {
-                            deleteSurroundingTextSafe(lastPartialTextLength, 0)
-                        }
-                        commitTextSafe(partialText)
-                        lastPartialTextLength = partialText.length
+                        if (isSpeechLiveTranslate && !activeSpeechTargetLang.isNullOrBlank()) {
+                            val src = activeSpeechSourceLang ?: "auto"
+                            val tgt = activeSpeechTargetLang ?: "en"
+                            val fastTrans = GoogleTranslationEngine.translateFast(partialText, src, tgt)
+                            val displayPreview = if (fastTrans != partialText && fastTrans.isNotBlank()) "$partialText ➔ $fastTrans" else "$partialText ➔ ..."
+                            onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.8f, displayPreview)
 
-                        val preview = if (accumulatedSpeechText.isNotEmpty()) {
-                            "${accumulatedSpeechText} $partialText"
+                            if (isSpeechDirectCommit && fastTrans != partialText && fastTrans.isNotBlank()) {
+                                if (lastPartialTextLength > 0) {
+                                    deleteSurroundingTextSafe(lastPartialTextLength, 0)
+                                }
+                                commitTextSafe(fastTrans)
+                                lastPartialTextLength = fastTrans.length
+                            }
                         } else {
-                            partialText
+                            if (isSpeechDirectCommit) {
+                                if (lastPartialTextLength > 0) {
+                                    deleteSurroundingTextSafe(lastPartialTextLength, 0)
+                                }
+                                commitTextSafe(partialText)
+                                lastPartialTextLength = partialText.length
+                            }
+
+                            val preview = if (accumulatedSpeechText.isNotEmpty()) {
+                                "${accumulatedSpeechText} $partialText"
+                            } else {
+                                partialText
+                            }
+                            onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.8f, preview)
                         }
-                        onVoiceStatusUpdate?.invoke(VoiceTypingStatus.LISTENING, 0.8f, preview)
                     }
                 }
 
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
 
-            val currentLocaleTag = preferences.activeLanguage.value.ttsLocaleTag
+            val sourceLangTag = if (!activeSpeechSourceLang.isNullOrBlank() && !activeSpeechSourceLang.equals("auto", ignoreCase = true)) {
+                Language.getById(activeSpeechSourceLang!!).ttsLocaleTag
+            } else {
+                preferences.activeLanguage.value.ttsLocaleTag
+            }
+
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, currentLocaleTag)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, currentLocaleTag)
-                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, currentLocaleTag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, sourceLangTag)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, sourceLangTag)
+                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, sourceLangTag)
                 putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(
-                    "hi-IN", "bn-IN", "mr-IN", "gu-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "pa-IN", "ur-PK", "en-US", "es-ES", "fr-FR", "de-DE", "ja-JP"
+                    "en-US", "es-ES", "fr-FR", "de-DE", "ja-JP", "ar-SA", "ru-RU", "pt-BR", "hi-IN", "bn-IN", "mr-IN", "gu-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "pa-IN", "ur-PK"
                 ))
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -547,6 +658,8 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
             recognizer.startListening(intent)
         } catch (e: Exception) {
             e.printStackTrace()
+            mainHandler.removeCallbacks(connectingTimeoutRunnable)
+            currentVoiceStatus = VoiceTypingStatus.ERROR
             onVoiceStatusUpdate?.invoke(VoiceTypingStatus.ERROR, 0f, "Could not start voice recognition: ${e.localizedMessage ?: "Unknown error"}")
             isVoiceSessionActive = false
         }
@@ -554,7 +667,10 @@ class LingoKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewMod
 
     private fun stopSpeechRecognition() {
         isVoiceSessionActive = false
+        isSpeechLiveTranslate = false
+        currentVoiceStatus = VoiceTypingStatus.IDLE
         mainHandler.removeCallbacks(restartListeningRunnable)
+        mainHandler.removeCallbacks(connectingTimeoutRunnable)
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()

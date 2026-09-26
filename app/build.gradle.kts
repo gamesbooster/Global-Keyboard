@@ -101,6 +101,7 @@ dependencies {
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
+  implementation(libs.firebase.auth)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
 
@@ -115,6 +116,7 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.play.services.ads)
+  implementation(libs.play.services.auth)
   implementation(libs.billing.ktx)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)

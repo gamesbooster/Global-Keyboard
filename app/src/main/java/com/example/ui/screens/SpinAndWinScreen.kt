@@ -848,6 +848,7 @@ fun SpinAndWinScreen(
             onDismiss = { showSignInSheet = false },
             onSignInSuccess = {
                 showSignInSheet = false
+                startSpin()
             }
         )
     }

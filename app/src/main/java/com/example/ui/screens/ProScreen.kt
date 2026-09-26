@@ -185,6 +185,12 @@ fun ProScreen(
     }
 
     fun startSubscriptionFlow(productId: String) {
+        if (!isSignedIn) {
+            selectedPlanId = productId
+            showSignInSheet = true
+            return
+        }
+
         val activity = context.findActivity()
         if (activity == null) {
             Toast.makeText(context, "Activity context not available.", Toast.LENGTH_SHORT).show()
@@ -205,6 +211,11 @@ fun ProScreen(
     }
 
     fun startCreditsPurchaseFlow(productId: String, amount: Int) {
+        if (!isSignedIn) {
+            showSignInSheet = true
+            return
+        }
+
         val activity = context.findActivity()
         if (activity == null) {
             Toast.makeText(context, "Activity context not available.", Toast.LENGTH_SHORT).show()

@@ -5,13 +5,15 @@ import java.util.concurrent.ConcurrentHashMap
 
 object SuggestionEngine {
 
-    // Dynamic user vocabulary learned during session
+    // Dynamic user vocabulary learned during session with adaptive frequency weighting
     private val learnedWords = ConcurrentHashMap.newKeySet<String>()
+    private val wordFrequency = ConcurrentHashMap<String, Int>()
 
     fun learnWord(word: String) {
         val clean = word.trim().lowercase()
-        if (clean.length in 2..25 && clean.all { it.isLetter() }) {
+        if (clean.length in 2..25 && clean.all { it.isLetter() || it == '\'' }) {
             learnedWords.add(clean)
+            wordFrequency.merge(clean, 1) { old, one -> (old + one).coerceAtMost(100) }
         }
     }
 
@@ -45,10 +47,10 @@ object SuggestionEngine {
         'm' to setOf('n', 'j', 'k')
     )
 
-    // Extensive dictionary with high-frequency everyday words
+    // Extensive dictionary with high-frequency everyday words ordered by usage frequency
     private val commonWords = mapOf(
         "en" to listOf(
-            "the", "be", "to", "of", "and", "a", "in", "that", "have", "I", "it", "for", "not", "on", "with",
+            "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with",
             "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her",
             "she", "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up", "out",
             "if", "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time", "no", "just",
@@ -72,29 +74,49 @@ object SuggestionEngine {
             "vibration", "theme", "themes", "style", "language", "translate", "translation", "voice", "speak",
             "speed", "pitch", "write", "writing", "read", "reading", "input", "output", "system", "entered",
             "enter", "entry", "suggest", "suggestion", "suggestions", "feature", "features", "save", "saving",
-            "saved", "lot", "lots", "fix", "fixed", "fixing", "look", "looking", "working", "work", "worked",
+            "saved", "lot", "lots", "fix", "fixed", "fixing", "looking", "working", "worked", "smooth", "smoothly",
             "free", "busy", "available", "schedule", "reschedule", "discuss", "discussion", "important", "urgent",
             "priority", "document", "file", "folder", "link", "address", "number", "profile", "account",
             "password", "security", "setting", "settings", "option", "options", "share", "shared", "sharing",
             "download", "install", "test", "testing", "tester", "tested", "response", "reply", "replies",
             "connect", "connection", "connected", "internet", "network", "battery", "power", "charge", "charger",
-            "level", "sound", "volume", "music", "camera", "media", "storage", "cloud", "backup", "restore",
+            "level", "volume", "camera", "media", "storage", "cloud", "backup", "restore", "compare", "comparison",
             "status", "progress", "forward", "backward", "next", "previous", "continue", "cancel", "confirm",
             "agree", "accept", "reject", "delete", "remove", "insert", "copy", "paste", "cut", "undo", "redo",
-            "select", "search", "find", "replace", "clear", "reset", "enable", "disable", "active", "inactive",
+            "select", "search", "find", "replace", "reset", "enable", "disable", "active", "inactive",
             "high", "low", "medium", "light", "dark", "mode", "color", "colors", "font", "bold", "italic",
             "underlined", "header", "title", "subtitle", "note", "notes", "memo", "calendar", "event", "alarm",
-            "clock", "timer", "reminder", "task", "tasks", "todo", "done", "pending", "inbox", "sent", "draft",
-            "trash", "spam", "archive", "favorite", "star", "bookmark", "history", "recent", "clear", "search",
-            "google", "bing", "search", "web", "browser", "page", "site", "website", "link", "url", "code",
-            "developer", "coding", "studio", "gemini", "artificial", "intelligence", "assistant", "agent",
-            "model", "prompt", "generate", "generated", "generating", "creation", "creative", "rewrite", "tone",
-            "grammar", "formal", "casual", "polite", "confident", "funny", "short", "expand", "summarize",
-            "summary", "listen", "listener", "speaking", "mic", "microphone", "headphone", "bluetooth",
-            "wifi", "cellular", "mobile", "tablet", "desktop", "laptop", "device", "hardware", "software",
-            "version", "update", "upgrade", "latest", "modern", "design", "layout", "neumorphism", "glassmorphism",
-            "flat", "minimal", "amoled", "gradient", "cyberpunk", "material", "smooth", "fluid", "responsive",
-            "touchscreen", "gesture", "swipe", "glide", "drag", "drop", "scroll", "fling", "pinch", "zoom"
+            "clock", "timer", "reminder", "task", "tasks", "todo", "pending", "inbox", "sent", "draft",
+            "trash", "spam", "archive", "favorite", "star", "bookmark", "history", "recent", "predict", "prediction",
+            "predictions", "second", "seconds", "minute", "minutes", "hour", "hours", "week", "weeks", "month",
+            "months", "year", "years", "google", "browser", "page", "site", "website", "code", "developer", "coding",
+            "gemini", "assistant", "model", "prompt", "generate", "generated", "generating", "creation", "creative",
+            "rewrite", "tone", "grammar", "formal", "casual", "polite", "confident", "funny", "short", "expand",
+            "summarize", "summary", "listen", "listener", "speaking", "mic", "microphone", "headphone", "bluetooth",
+            "wifi", "cellular", "mobile", "tablet", "desktop", "laptop", "hardware", "software", "version", "upgrade",
+            "latest", "modern", "design", "layout", "neumorphism", "fluid", "responsive", "gesture", "swipe", "glide",
+            "drag", "drop", "scroll", "fling", "pinch", "zoom", "true", "false", "yes", "right", "wrong", "sure",
+            "maybe", "probably", "definitely", "absolutely", "certainly", "actually", "basically", "literally",
+            "totally", "completely", "entirely", "exactly", "quite", "rather", "pretty", "fairly", "hardly", "barely",
+            "almost", "nearly", "mostly", "largely", "mainly", "chiefly", "especially", "particularly", "specifically",
+            "generally", "naturally", "obviously", "clearly", "apparently", "evidently", "hopefully", "thankfully",
+            "fortunately", "unfortunately", "sadly", "luckily", "honestly", "frankly", "seriously", "personally",
+            "meanwhile", "anyway", "besides", "furthermore", "moreover", "however", "therefore", "otherwise",
+            "instead", "along", "across", "behind", "beyond", "between", "among", "through", "throughout", "during",
+            "against", "towards", "upon", "within", "under", "below", "above", "across", "alongside", "near", "far",
+            "here", "where", "everywhere", "anywhere", "somewhere", "nowhere", "everyone", "someone", "anyone",
+            "nobody", "everything", "anything", "nothing", "both", "either", "neither", "each", "every", "several",
+            "few", "many", "much", "little", "less", "least", "more", "most", "such", "own", "same", "different",
+            "similar", "unique", "special", "common", "general", "public", "private", "personal", "social", "major",
+            "minor", "main", "primary", "secondary", "final", "initial", "original", "current", "future", "past",
+            "present", "early", "late", "recent", "former", "latter", "whole", "entire", "full", "empty", "half",
+            "double", "single", "simple", "complex", "easy", "difficult", "hard", "tough", "soft", "heavy", "light",
+            "strong", "weak", "thick", "thin", "wide", "narrow", "deep", "shallow", "high", "low", "tall", "short",
+            "big", "large", "huge", "great", "small", "little", "tiny", "hot", "cold", "warm", "cool", "clean",
+            "dirty", "fresh", "dry", "wet", "bright", "dark", "rich", "poor", "safe", "dangerous", "fast", "slow",
+            "quick", "rapid", "calm", "loud", "quiet", "silent", "busy", "free", "ready", "open", "closed", "tight",
+            "loose", "straight", "curved", "flat", "round", "sharp", "dull", "smooth", "rough", "sweet", "bitter",
+            "sour", "salty", "tasty", "delicious", "healthy", "sick", "alive", "dead", "young", "old", "new"
         ),
         "hi" to listOf(
             "नमस्ते", "आप", "कैसे", "हैं", "धन्यवाद", "हाँ", "नहीं", "कहाँ", "जा", "रहे", "सुप्रभात", "शुभ", "दोस्त",
@@ -109,120 +131,150 @@ object SuggestionEngine {
             "कोण", "येथे", "तेथे", "ठीक", "भाऊ", "बहीण", "आई", "बाबा", "आज", "उद्या", "रात्र", "दिवस", "आनंद", "सुंदर"
         ),
         "bn" to listOf(
-            "হ্যালো", "আপনি", "কেमन", "আছেন", "ধন্যবাদ", "হ্যাঁ", "না", "কোথায়", "যাচ্ছেন", "শুভ", "সকাল", "বন্ধু",
-            "কাজ", "সময়", "বাড়ি", "জল", "খাবার", "ভালোবাসা", "খুব", "ভালো", "সবাই", "আজ", "কাল", "রাত", "দিন"
+            "হ্যালো", "আপনি", "কেমন", "আছেন", "ধন্যবাদ", "হ্যাঁ", "না", "কোথায়", "যাচ্ছেন", "শুভ", "সকাল", "বন্ধু",
+            "কাজ", "সময়", "বাড়ি", "জল", "খাবার", "ভালোবাসা", "খুব", "ভালো", "বাংলাদেশ", "সব", "মানুষ", "কি", "কখন"
         ),
         "es" to listOf(
-            "hola", "gracias", "por", "favor", "buenos", "días", "cómo", "estás", "bien", "amigo", "trabajo",
-            "tiempo", "casa", "agua", "comida", "amor", "mucho", "todo", "donde", "cuando", "quien", "si", "no",
-            "siempre", "nunca", "hoy", "mañana", "noche", "tarde", "familia", "hermano", "hermana", "feliz",
-            "necesito", "quiero", "puedo", "hacer", "decir", "ir", "venir", "estar", "tener", "ser", "dar"
+            "hola", "cómo", "estás", "gracias", "sí", "no", "dónde", "vas", "buenos", "días", "amigo", "trabajo",
+            "tiempo", "casa", "agua", "comida", "amor", "mucho", "bien", "todos", "gente", "qué", "cuándo", "quién",
+            "aquí", "allí", "por", "favor", "bienvenido", "hasta", "luego", "mañana", "noche", "tarde", "feliz"
         ),
         "fr" to listOf(
-            "bonjour", "merci", "salut", "comment", "allez", "vous", "bien", "ami", "travail", "temps", "maison",
-            "eau", "nourriture", "amour", "beaucoup", "tout", "où", "quand", "qui", "oui", "non", "toujours",
-            "jamais", "aujourd'hui", "demain", "soir", "famille", "frère", "soeur", "heureux", "bonne", "journée"
+            "bonjour", "comment", "allez", "vous", "merci", "oui", "non", "où", "allez", "bonne", "journée", "ami",
+            "travail", "temps", "maison", "eau", "nourriture", "amour", "très", "bien", "tous", "gens", "quoi", "quand"
+        ),
+        "de" to listOf(
+            "hallo", "wie", "geht", "danke", "ja", "nein", "wo", "guten", "morgen", "tag", "freund", "arbeit",
+            "zeit", "haus", "wasser", "essen", "liebe", "sehr", "gut", "alle", "leute", "was", "wann", "wer"
+        ),
+        "pt" to listOf(
+            "olá", "como", "está", "obrigado", "sim", "não", "onde", "vai", "bom", "dia", "amigo", "trabalho",
+            "tempo", "casa", "água", "comida", "amor", "muito", "bem", "todos", "gente", "que", "quando", "quem"
+        ),
+        "ru" to listOf(
+            "привет", "как", "дела", "спасибо", "да", "нет", "где", "доброе", "утро", "день", "друг", "работа",
+            "время", "дом", "вода", "еда", "любовь", "очень", "хорошо", "все", "люди", "что", "когда", "кто"
+        ),
+        "ar" to listOf(
+            "مرحبا", "كيف", "حالك", "شكرا", "نعم", "لا", "أين", "صباح", "الخير", "صديق", "عمل", "وقت",
+            "بيت", "ماء", "طعام", "حب", "جدا", "جيد", "كل", "ناس", "ماذا", "متى", "من", "هنا", "هناك"
         )
     )
 
-    // Extensive typo correction dictionary mapping mistyped words to intended words
-    private val commonTypos = mapOf(
-        // User specific typos & keyboard mistouches
-        "thye" to "the",
-        "autoi" to "auto",
-        "nbot" to "not",
-        "woek" to "work",
-        "propeelky" to "properly",
-        "propely" to "properly",
-        "posible" to "possible",
-        "psosuible" to "possible",
-        "posbbile" to "possible",
-        "sson" to "soon",
-        "anfd" to "and",
-        "aanfd" to "and",
-        "cahaneg" to "change",
-        "chaneg" to "change",
-        "chagne" to "change",
-        "keyopad" to "keypad",
-        "fist" to "first",
-        "frist" to "first",
-        "featurra" to "feature",
-        "feataues" to "features",
-        "feataue" to "feature",
-        "fetures" to "features",
-        "iutsd" to "it's",
-        "lasnuage" to "language",
-        "lahuage" to "language",
-        "laguafe" to "language",
-        "laguage" to "language",
-        "lanugage" to "language",
-        "langauge" to "language",
-        "voce" to "voice",
-        "voise" to "voice",
-        "thata" to "that",
-        "aftrew" to "after",
-        "cliking" to "clicking",
-        "trala" to "translate",
-        "trasnlate" to "translate",
-        "tranlate" to "translate",
-        "ouput" to "output",
-        "inpu" to "input",
-        "cueerenly" to "currently",
-        "curently" to "currently",
-        "horizontala" to "horizontal",
-        "horizantal" to "horizontal",
-        "scrolloing" to "scrolling",
-        "scroling" to "scrolling",
-        "rthaty" to "that",
-        "blook" to "look",
-        "ggods" to "good",
-        "prfetionba" to "professional",
-        "profesional" to "professional",
+    // Extensive real-world typo dictionary & contractions map (resolves instantly in O(1))
+    val commonTypos: Map<String, String> = mapOf(
+        // User-highlighted mistouches and phonetic slips
         "eneterd" to "entered",
-        "eneter" to "enter",
+        "feataues" to "features",
+        "feautres" to "features",
         "sugset" to "suggest",
-        "sugsets" to "suggests",
+        "susgegs" to "suggestions",
+        "ssggenstsio" to "suggestions",
         "suggestons" to "suggestions",
-        "esay" to "easy",
-        "menas" to "means",
-        "meand" to "means",
+        "sugestions" to "suggestions",
+        "sugestion" to "suggestion",
+        "sugest" to "suggest",
+        "sisgge" to "suggest",
+        "sugsets" to "suggests",
+        "caopare" to "compare",
+        "comapre" to "compare",
+        "compair" to "compare",
+        "gbor" to "gboard",
+        "gbord" to "gboard",
+        "gboad" to "gboard",
+        "woesk" to "words",
+        "workd" to "word",
+        "wrds" to "words",
+        "wrod" to "word",
+        "prsbisntsiso" to "predictions",
+        "pridiction" to "prediction",
+        "predictin" to "prediction",
+        "predictio" to "prediction",
+        "swnod" to "second",
+        "secnd" to "second",
+        "scnd" to "second",
+        "kwybord" to "keyboard",
         "keybord" to "keyboard",
         "keyborad" to "keyboard",
-        "keborad" to "keyboard",
         "kybord" to "keyboard",
-        "palcemnt" to "placement",
-        "palacemts" to "placement",
-        "placemnt" to "placement",
-        "typoing" to "typing",
-        "typign" to "typing",
-        "alaiment" to "alignment",
-        "alignemnt" to "alignment",
-        "aligment" to "alignment",
-        "alfabet" to "alphabet",
-        "eaxtrs" to "extra",
-        "extr" to "extra",
-        "calarra" to "clear",
-        "cler" to "clear",
-        "bauttaon" to "button",
-        "botton" to "button",
-        "buttn" to "button",
-        "analays" to "analyze",
-        "analyz" to "analyze",
-        "thinkd" to "things",
-        "thigns" to "things",
-        "beast" to "best",
-        "insprstion" to "inspiration",
-        "insperation" to "inspiration",
-        "themas" to "themes",
-        "thimesa" to "themes",
-        "gloassmorphisusm" to "glassmorphism",
-        "psosible" to "possible",
-        "soze" to "size",
-        "sze" to "size",
-        "hight" to "height",
-        "heigth" to "height",
-        "widht" to "width",
-        // Common conversational typos & transpositions
+        "keborad" to "keyboard",
+        "keyopad" to "keypad",
+        "smostiu" to "smooth",
+        "smoth" to "smooth",
+        "smoothe" to "smooth",
+        "prssh" to "press",
+        "pres" to "press",
+        "prss" to "press",
+        "recek" to "recheck",
+        "rechck" to "recheck",
+        "plese" to "please",
+        "plz" to "please",
+        "pls" to "please",
+        "pleas" to "please",
+        "thx" to "thanks",
+        "thnx" to "thanks",
+        "ty" to "thank you",
+        "tysm" to "thank you so much",
+        "msg" to "message",
+        "txt" to "text",
+        "pic" to "picture",
+        "abt" to "about",
+        "bcz" to "because",
+        "bcoz" to "because",
+        "cuz" to "because",
+        "bc" to "because",
+        "becuse" to "because",
+        "becasue" to "because",
+        "idk" to "I don't know",
+        "tbh" to "to be honest",
+        "imo" to "in my opinion",
+        "rn" to "right now",
+        "omw" to "on my way",
+        "brb" to "be right back",
+        "np" to "no problem",
+        "yw" to "you're welcome",
+        "fyi" to "for your information",
+        "asap" to "as soon as possible",
+
+        // Smartphone contractions without apostrophe (Gboard standard auto-expansion)
+        "im" to "I'm",
+        "dont" to "don't",
+        "cant" to "can't",
+        "wont" to "won't",
+        "didnt" to "didn't",
+        "isnt" to "isn't",
+        "arent" to "aren't",
+        "wasnt" to "wasn't",
+        "werent" to "weren't",
+        "hasnt" to "hasn't",
+        "havent" to "haven't",
+        "hadnt" to "hadn't",
+        "couldnt" to "couldn't",
+        "shouldnt" to "shouldn't",
+        "wouldnt" to "wouldn't",
+        "youre" to "you're",
+        "theyre" to "they're",
+        "weve" to "we've",
+        "youve" to "you've",
+        "theyve" to "they've",
+        "ive" to "I've",
+        "ill" to "I'll",
+        "youll" to "you'll",
+        "theyll" to "they'll",
+        "well" to "we'll",
+        "thats" to "that's",
+        "whats" to "what's",
+        "theres" to "there's",
+        "heres" to "here's",
+        "wheres" to "where's",
+        "hows" to "how's",
+        "whens" to "when's",
+        "whys" to "why's",
+        "lets" to "let's",
+        "hes" to "he's",
+        "shes" to "she's",
+
+        // Frequent conversational typos & transpositions
         "teh" to "the",
         "hte" to "the",
         "eth" to "the",
@@ -235,93 +287,116 @@ object SuggestionEngine {
         "thsi" to "this",
         "tihs" to "this",
         "htis" to "this",
-        "thier" to "their",
-        "ther" to "there",
-        "palce" to "place",
         "taht" to "that",
-        "woudl" to "would",
-        "coudl" to "could",
-        "shoudl" to "should",
-        "feild" to "field",
-        "beleive" to "believe",
-        "belive" to "believe",
-        "becuase" to "because",
-        "becasue" to "because",
-        "bcuz" to "because",
-        "bcoz" to "because",
-        "soemthing" to "something",
-        "somthing" to "something",
-        "wrk" to "work",
-        "wokr" to "work",
-        "recieve" to "receive",
-        "recive" to "receive",
-        "seperate" to "separate",
-        "untill" to "until",
-        "wierd" to "weird",
-        "accomodate" to "accommodate",
-        "definately" to "definitely",
-        "definetly" to "definitely",
-        "goverment" to "government",
-        "occured" to "occurred",
-        "tommorrow" to "tomorrow",
-        "tomorow" to "tomorrow",
-        "tmrw" to "tomorrow",
-        "truely" to "truly",
-        "alot" to "a lot",
-        "alway" to "always",
-        "alaways" to "always",
-        "thx" to "thanks",
-        "thnk" to "thank",
-        "tysm" to "thank you so much",
-        "pls" to "please",
-        "plz" to "please",
-        "peopl" to "people",
+        "tht" to "that",
+        "wiht" to "with",
+        "wtih" to "with",
+        "wih" to "with",
+        "fro" to "for",
+        "ofr" to "for",
+        "fomr" to "from",
+        "form" to "from",
+        "yuo" to "you",
+        "oyu" to "you",
+        "yuor" to "your",
+        "yoru" to "your",
+        "cna" to "can",
+        "acn" to "can",
+        "hav" to "have",
+        "hvae" to "have",
+        "ahve" to "have",
+        "lik" to "like",
+        "liek" to "like",
+        "knwo" to "know",
+        "nkow" to "know",
+        "tiem" to "time",
+        "tme" to "time",
         "peopel" to "people",
-        "helpo" to "hello",
-        "helo" to "hello",
-        "hlo" to "hello",
-        "hlw" to "hello",
-        "gm" to "Good morning",
-        "gn" to "Good night",
-        "omw" to "on my way",
-        "idk" to "I don't know",
-        "btw" to "by the way",
-        "alright" to "all right",
-        "dont" to "don't",
-        "cant" to "can't",
-        "wont" to "won't",
-        "im" to "I'm",
-        "youre" to "you're",
-        "theyre" to "they're",
-        "didnt" to "didn't",
-        "isnt" to "isn't",
-        "arent" to "aren't",
-        "shouldnt" to "shouldn't",
-        "couldnt" to "couldn't",
-        "wouldnt" to "wouldn't",
-        "whos" to "who's",
-        "whats" to "what's",
-        "hows" to "how's",
-        "thats" to "that's",
-        "wher" to "where",
-        "whre" to "where",
-        "wanna" to "want to",
-        "gonna" to "going to",
-        "gotta" to "got to",
+        "poeple" to "people",
+        "whihc" to "which",
+        "wihch" to "which",
+        "mkae" to "make",
+        "maek" to "make",
+        "alot" to "a lot",
+        "somethign" to "something",
+        "somthing" to "something",
+        "mesage" to "message",
         "messege" to "message",
-        "msg" to "message",
-        "awsum" to "awesome",
-        "beautifull" to "beautiful",
+        "messge" to "message",
+        "tomorow" to "tomorrow",
+        "tommorrow" to "tomorrow",
+        "tomoro" to "tomorrow",
+        "yestarday" to "yesterday",
+        "yesrday" to "yesterday",
         "freind" to "friend",
         "frnd" to "friend",
-        "pic" to "picture",
-        "sry" to "sorry",
-        "srry" to "sorry",
+        "awsome" to "awesome",
+        "perfct" to "perfect",
+        "phne" to "phone",
+        "typign" to "typing",
+        "typoing" to "typing",
+        "quik" to "quick",
+        "simpel" to "simple",
         "diffrent" to "different",
-        "diferent" to "different"
+        "differant" to "different",
+        "rember" to "remember",
+        "remmeber" to "remember",
+        "beleive" to "believe",
+        "definately" to "definitely",
+        "definitly" to "definitely",
+        "seperate" to "separate",
+        "recieve" to "receive",
+        "untill" to "until",
+        "goverment" to "government",
+        "enviroment" to "environment",
+        "begining" to "beginning",
+        "suprise" to "surprise",
+        "completly" to "completely",
+        "resturant" to "restaurant",
+        "calender" to "calendar",
+        "adress" to "address",
+        "sucess" to "success",
+        "neccessary" to "necessary",
+        "truely" to "truly",
+        "mispell" to "misspell",
+        "wierd" to "weird",
+        "writting" to "writing",
+        "happend" to "happened",
+        "fist" to "first",
+        "frist" to "first",
+        "cahaneg" to "change",
+        "chaneg" to "change",
+        "chagne" to "change",
+        "lasnuage" to "language",
+        "lanugage" to "language",
+        "langauge" to "language",
+        "trasnlate" to "translate",
+        "tranlate" to "translate",
+        "trala" to "translate",
+        "voce" to "voice",
+        "voise" to "voice",
+        "featurra" to "feature",
+        "feataue" to "feature",
+        "feataues" to "features",
+        "fetures" to "features",
+        "cliking" to "clicking",
+        "ouput" to "output",
+        "inpu" to "input",
+        "bauttaon" to "button",
+        "botton" to "button",
+        "buttn" to "button",
+        "soze" to "size",
+        "sze" to "size",
+        "hight" to "height",
+        "heigth" to "height",
+        "widht" to "width",
+        "palcemnt" to "placement",
+        "placemnt" to "placement",
+        "alaiment" to "alignment",
+        "alignemnt" to "alignment"
     )
 
-    // Next-Word Prediction (Language Model N-Gram Matrix like Google Keyboard)
+    // Next-Word Prediction Map (Comprehensive Trigrams & Bigrams like Gboard)
     private val NEXT_WORD_PREDICTIONS: Map<String, List<String>> = mapOf(
         // Trigrams / Compound phrases
         "how are" to listOf("you", "things", "they", "we"),
@@ -394,6 +469,8 @@ object SuggestionEngine {
         "all the" to listOf("best", "time", "way", "things"),
         "take care" to listOf("of", "and", "see", "always"),
         "welcome to" to listOf("the", "our", "my"),
+        "word suggestions" to listOf("and", "predictions", "in", "for"),
+        "word prediction" to listOf("and", "engine", "model", "for"),
 
         // Bigrams / Single word followers
         "how" to listOf("are", "is", "about", "to", "was", "can", "do"),
@@ -425,24 +502,56 @@ object SuggestionEngine {
         "have" to listOf("a", "to", "you", "been", "done"),
         "good" to listOf("morning", "afternoon", "evening", "night", "luck", "job"),
         "happy" to listOf("birthday", "new", "to", "for"),
-        "see" to listOf("you", "what", "it", "how"),
-        "nice" to listOf("to", "meeting", "day", "one"),
+        "nice" to listOf("to", "one", "day", "work"),
+        "best" to listOf("regards", "of", "wishes", "way"),
+        "see" to listOf("you", "if", "what", "later"),
+        "call" to listOf("me", "you", "later", "back"),
+        "tell" to listOf("me", "them", "him", "her"),
+        "send" to listOf("me", "the", "it", "you"),
+        "give" to listOf("me", "us", "a", "the"),
+        "get" to listOf("the", "back", "it", "a"),
+        "take" to listOf("care", "it", "a", "your"),
+        "make" to listOf("sure", "it", "a", "the"),
+        "come" to listOf("to", "over", "here", "on"),
+        "go" to listOf("to", "back", "home", "out"),
+        "look" to listOf("at", "for", "forward", "like"),
+        "try" to listOf("to", "it", "again", "and"),
+        "keep" to listOf("in", "it", "up", "going"),
+        "feel" to listOf("free", "like", "good", "better"),
         "sounds" to listOf("good", "great", "like", "awesome"),
-        "sorry" to listOf("for", "about", "I", "to"),
-        "hello" to listOf("everyone", "sir", "how", "friend", "there"),
-        "hey" to listOf("there", "how", "what", "bro", "friend"),
-        "hi" to listOf("there", "how", "all", "everyone"),
-        "ok" to listOf("thanks", "sure", "got", "sounds"),
-        "okay" to listOf("thanks", "sounds", "sure", "I"),
-        "yes" to listOf("I", "sure", "please", "absolutely"),
-        "no" to listOf("problem", "worries", "thanks", "I")
+        "no" to listOf("problem", "worries", "doubt", "one"),
+        "of" to listOf("course", "the", "all", "them"),
+        "as" to listOf("soon", "well", "always", "if"),
+        "at" to listOf("the", "all", "least", "home"),
+        "in" to listOf("the", "my", "our", "this"),
+        "on" to listOf("the", "my", "your", "it"),
+        "to" to listOf("the", "be", "do", "make"),
+        "for" to listOf("the", "your", "you", "me"),
+        "with" to listOf("you", "the", "my", "us"),
+        "about" to listOf("it", "the", "this", "that"),
+        "by" to listOf("the", "tomorrow", "then", "now"),
+        "from" to listOf("the", "my", "here", "there"),
+        "my" to listOf("friend", "love", "dear", "way"),
+        "your" to listOf("help", "time", "message", "email"),
+        "our" to listOf("team", "keyboard", "project", "app"),
+        "second" to listOf("word", "chance", "time", "thought"),
+        "word" to listOf("suggestions", "prediction", "count", "meaning"),
+        "keyboard" to listOf("theme", "layout", "settings", "typing")
     )
 
     private fun areNeighbors(c1: Char, c2: Char): Boolean {
-        if (c1 == c2) return true
-        val lower1 = c1.lowercaseChar()
-        val lower2 = c2.lowercaseChar()
-        return QWERTY_NEIGHBORS[lower1]?.contains(lower2) == true
+        return QWERTY_NEIGHBORS[c1]?.contains(c2) == true
+    }
+
+    private fun isSubsequence(sub: String, full: String): Boolean {
+        if (sub.length > full.length) return false
+        var i = 0
+        var j = 0
+        while (i < sub.length && j < full.length) {
+            if (sub[i] == full[j]) i++
+            j++
+        }
+        return i == sub.length
     }
 
     /**
@@ -511,21 +620,46 @@ object SuggestionEngine {
             val allWords = (learnedWords + langWords).distinct()
             val isValidExactWord = allWords.any { it.equals(prefixLower, ignoreCase = true) }
 
-            // 1. Direct typo exact match check (instant fix for typos)
+            // 1. Direct typo exact match check (instant fix for typos & contractions)
             commonTypos[prefixLower]?.let {
                 results.add(it)
             }
 
-            // 2. If typed word is already valid, include it as primary choice
+            // 2. If typed word is already valid, include it
             if (isValidExactWord && !results.contains(prefixLower)) {
                 results.add(prefixLower)
             }
 
-            // 3. Spatial QWERTY fuzzy neighbor match for mistouches & transpositions
-            if (prefixLower.length >= 2) {
+            // 3. Exact word prefix completions (e.g. "typ" -> "type", "typing") ranked by frequency
+            val prefixMatches = allWords
+                .filter { it.lowercase().startsWith(prefixLower) && !it.equals(prefixLower, ignoreCase = true) }
+
+            for (match in prefixMatches) {
+                if (!results.contains(match)) {
+                    results.add(match)
+                }
+                if (results.size >= 4) break
+            }
+
+            // 4. Subsequence / abbreviation matches (e.g. "msg" -> "message", "pls" -> "please", "sec" -> "second")
+            if (results.size < 4 && prefixLower.length >= 2) {
+                val subMatches = allWords.filter {
+                    it.length > prefixLower.length && isSubsequence(prefixLower, it.lowercase())
+                }
+                for (sub in subMatches) {
+                    if (!results.contains(sub)) {
+                        results.add(sub)
+                    }
+                    if (results.size >= 4) break
+                }
+            }
+
+            // 5. Spatial QWERTY fuzzy neighbor match for mistouches & transpositions
+            if (results.size < 4 && prefixLower.length >= 2) {
                 val fuzzyCandidates = allWords
+                    .filter { Math.abs(it.length - prefixLower.length) <= 1 }
                     .map { word -> word to calculateSpatialDistance(prefixLower, word) }
-                    .filter { it.second <= 1.42f }
+                    .filter { it.second <= 1.45f }
                     .sortedBy { it.second }
                     .map { it.first }
 
@@ -537,19 +671,7 @@ object SuggestionEngine {
                 }
             }
 
-            // 4. Exact word prefix completions (e.g. "typ" -> "type", "typing")
-            val prefixMatches = allWords
-                .filter { it.lowercase().startsWith(prefixLower) }
-                .sortedBy { it.length }
-
-            for (match in prefixMatches) {
-                if (!results.contains(match)) {
-                    results.add(match)
-                }
-                if (results.size >= 5) break
-            }
-
-            // 5. Fill fallback with English if needed
+            // 6. Fill fallback with English if needed
             if (results.size < 3 && langCode != "en") {
                 val general = (commonWords["en"] ?: emptyList()).filter { it.lowercase().startsWith(prefixLower) }
                 results.addAll(general.take(3 - results.size))
@@ -626,31 +748,28 @@ object SuggestionEngine {
     /**
      * Finds the best auto-correction candidate when user taps space after typing a mistouched word.
      */
-    fun getAutoCorrection(word: String, langCode: String = "en"): String? {
-        val lower = word.lowercase().trim()
-        if (lower.length < 2) return null
+    fun getAutoCorrection(word: String, langCode: String = "en"): String? = findAutocorrect(word, langCode)
 
-        // 1. Check exact typo dictionary
-        val typoMatch = commonTypos[lower]
-        if (typoMatch != null) {
-            val isCapitalized = word.firstOrNull()?.isUpperCase() == true
-            return if (isCapitalized && typoMatch.length > 1) {
-                typoMatch.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
-            } else {
-                typoMatch
-            }
-        }
+    fun findAutocorrect(word: String, langCode: String = "en"): String? {
+        val clean = word.trim().lowercase()
+        if (clean.length < 2) return null
 
-        // 2. If it's already a valid dictionary word or learned word, do NOT over-correct it
-        val langWords = (commonWords[langCode] ?: commonWords["en"] ?: emptyList())
-        if (langWords.any { it.equals(lower, ignoreCase = true) } || learnedWords.contains(lower)) {
+        // 1. Direct typo dictionary hit
+        commonTypos[clean]?.let { return it }
+
+        val langWords = commonWords[langCode] ?: commonWords["en"] ?: emptyList()
+        val allWords = (learnedWords + langWords).distinct()
+
+        // 2. If it's already an exact known word, do not aggressively autocorrect it!
+        if (allWords.any { it.equals(clean, ignoreCase = true) }) {
             return null
         }
 
-        // 3. Spatial QWERTY neighbor check
-        if (lower.length >= 3) {
-            val bestMatch = langWords
-                .map { it to calculateSpatialDistance(lower, it) }
+        // 3. Spatial QWERTY keyboard distance search
+        val candidatesByLength = allWords.filter { Math.abs(it.length - clean.length) <= 1 }
+        if (candidatesByLength.isNotEmpty()) {
+            val bestMatch = candidatesByLength
+                .map { it to calculateSpatialDistance(clean, it) }
                 .filter { it.second <= 1.35f }
                 .minByOrNull { it.second }
 
@@ -709,6 +828,7 @@ object SuggestionEngine {
         langCode: String = "en"
     ): CandidateStripResult {
         val prefix = currentPrefix.trim()
+        val grammarFix = GrammarEngine.checkGrammar(contextBefore, prefix)
 
         // 1. ACTIVE TYPING MODE: user has typed characters in current word
         if (prefix.isNotEmpty()) {
@@ -719,7 +839,7 @@ object SuggestionEngine {
             val allWords = (learnedWords + langWords).distinct()
             val isKnownExactWord = allWords.any { it.equals(typedLower, ignoreCase = true) }
 
-            // Priority A: Direct instant typo match (e.g. "thsi" -> "this", "hte" -> "the", "adn" -> "and", "palce" -> "place")
+            // Priority A: Direct instant typo match (e.g. "thsi" -> "this", "susgegs" -> "suggestions", "im" -> "I'm")
             val directTypo = commonTypos[typedLower]
             if (directTypo != null) {
                 val primary = formatWord(directTypo, isCapitalized)
@@ -728,7 +848,8 @@ object SuggestionEngine {
                     literal = literal,
                     primary = primary,
                     alternative = alternative,
-                    isAutoCorrection = true
+                    isAutoCorrection = true,
+                    grammarFix = grammarFix
                 )
             }
 
@@ -741,17 +862,17 @@ object SuggestionEngine {
                     literal = literal,
                     primary = primary,
                     alternative = alternative,
-                    isAutoCorrection = false
+                    isAutoCorrection = false,
+                    grammarFix = grammarFix
                 )
             }
 
             // Priority C: Spatial QWERTY proximity & transposition check (<2ms)
             if (typedLower.length >= 2) {
-                // Filter candidate words by length to guarantee sub-millisecond execution
                 val candidatesByLength = allWords.filter { Math.abs(it.length - typedLower.length) <= 1 }
                 val bestMatch = candidatesByLength
                     .map { it to calculateSpatialDistance(typedLower, it) }
-                    .filter { it.second <= 1.32f }
+                    .filter { it.second <= 1.35f }
                     .minByOrNull { it.second }
 
                 if (bestMatch != null) {
@@ -761,15 +882,14 @@ object SuggestionEngine {
                         literal = literal,
                         primary = primary,
                         alternative = alternative,
-                        isAutoCorrection = true
+                        isAutoCorrection = true,
+                        grammarFix = grammarFix
                     )
                 }
             }
 
             // Priority D: Word prefix completion (e.g. "typ" -> "type", "typing")
             val completions = allWords.filter { it.lowercase().startsWith(typedLower) && !it.equals(typedLower, ignoreCase = true) }
-                .sortedBy { it.length }
-
             if (completions.isNotEmpty()) {
                 val primary = formatWord(completions[0], isCapitalized)
                 val alternative = if (completions.size > 1) formatWord(completions[1], isCapitalized) else ""
@@ -777,7 +897,8 @@ object SuggestionEngine {
                     literal = literal,
                     primary = primary,
                     alternative = alternative,
-                    isAutoCorrection = false
+                    isAutoCorrection = false,
+                    grammarFix = grammarFix
                 )
             }
 
@@ -786,7 +907,8 @@ object SuggestionEngine {
                 literal = literal,
                 primary = literal,
                 alternative = "",
-                isAutoCorrection = false
+                isAutoCorrection = false,
+                grammarFix = grammarFix
             )
         }
 
@@ -800,18 +922,19 @@ object SuggestionEngine {
             literal = leftOption,
             primary = primary,
             alternative = alternative,
-            isAutoCorrection = false
+            isAutoCorrection = false,
+            grammarFix = grammarFix
         )
     }
 }
 
 /**
- * Gboard-grade 3-slot candidate strip data model.
+ * Gboard-grade 3-slot candidate strip data model with real-time Grammar Repair.
  */
 data class CandidateStripResult(
     val literal: String,              // Left slot: Literal typed input (in quotation marks/italicized)
     val primary: String,              // Center slot: Primary auto-correction or highest-probability candidate
     val alternative: String,          // Right slot: Secondary alternative or prediction
-    val isAutoCorrection: Boolean     // True if primary is an auto-correction to be committed on Space
+    val isAutoCorrection: Boolean,    // True if primary is an auto-correction to be committed on Space
+    val grammarFix: GrammarEngine.GrammarSuggestion? = null // Inline real-time grammar repair chip
 )
-

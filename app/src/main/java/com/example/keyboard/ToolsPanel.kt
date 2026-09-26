@@ -42,6 +42,9 @@ data class ToolItem(
 @Composable
 fun ToolsPanel(
     theme: KeyboardTheme,
+    creditsCoins: Int = 100,
+    isPremium: Boolean = false,
+    onOpenTopUp: () -> Unit = {},
     onOpenSmartReply: () -> Unit,
     onOpenTranslate: () -> Unit,
     onOpenVoice: () -> Unit,
@@ -163,12 +166,42 @@ fun ToolsPanel(
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = "KEYBOARD TOOLS",
+                    text = "TOOLS",
                     color = theme.textColor,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp
                 )
+            }
+
+            // Sleek Credit Balance Pill / Top-up trigger
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (theme.isDark) Color(0xFF282315) else Color(0xFFFEF3C7),
+                border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.85f)),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { onOpenTopUp() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("🪙", fontSize = 11.sp)
+                    Text(
+                        text = if (isPremium) "VIP PRO" else "$creditsCoins Coins",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFD97706)
+                    )
+                    Text(
+                        "+",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFFD97706)
+                    )
+                }
             }
 
             IconButton(

@@ -12,6 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.example.ads.AdMobConfig
 import com.example.data.LingoKeyPreferences
 import com.example.ui.screens.*
@@ -26,7 +29,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        AdMobConfig.initialize(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                AdMobConfig.initialize(this@MainActivity)
+            } catch (_: Exception) {
+            }
+        }
         preferences = LingoKeyPreferences.getInstance(this)
         pendingDestination.value = intent?.getStringExtra("destination")
 

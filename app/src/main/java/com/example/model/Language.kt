@@ -11,7 +11,8 @@ enum class LayoutType {
     MALAYALAM,
     GURMUKHI,
     ARABIC,
-    JAPANESE
+    JAPANESE,
+    CYRILLIC
 }
 
 enum class LanguageCategory(val displayName: String) {
@@ -35,7 +36,7 @@ data class Language(
         val ALL_LANGUAGES = listOf(
             // --- Top Priority Languages (English + Top 3) ---
             Language("en", "en", "English", "English", "🇺🇸", LayoutType.QWERTY, true, "en-US", isGlobal = true),
-            Language("hi", "hi", "Hindi", "हिन्दी", "🇮🇳", LayoutType.DEVANAGARI, true, "hi-IN", isGlobal = false),
+            Language("hi", "hi", "Hindi", "हिन्दी", "🇮🇳", LayoutType.DEVANAGARI, false, "hi-IN", isGlobal = false),
             Language("hinglish", "hi", "Hinglish", "हिंग्लिश (Phonetic)", "🇮🇳", LayoutType.QWERTY, false, "hi-IN", isGlobal = false),
             Language("mr", "mr", "Marathi", "मराठी", "🇮🇳", LayoutType.DEVANAGARI, false, "mr-IN", isGlobal = false),
             Language("bn", "bn", "Bengali", "বাংলা", "🇧🇩", LayoutType.BENGALI, false, "bn-BD", isGlobal = false),
@@ -46,7 +47,7 @@ data class Language(
             Language("de", "de", "German", "Deutsch", "🇩🇪", LayoutType.QWERTY, false, "de-DE", isGlobal = true),
             Language("ar", "ar", "Arabic", "العربية", "🇸🇦", LayoutType.ARABIC, false, "ar-SA", isGlobal = true),
             Language("pt", "pt", "Portuguese", "Português", "🇧🇷", LayoutType.QWERTY, false, "pt-BR", isGlobal = true),
-            Language("ru", "ru", "Russian", "Русский", "🇷🇺", LayoutType.QWERTY, false, "ru-RU", isGlobal = true),
+            Language("ru", "ru", "Russian", "Русский", "🇷🇺", LayoutType.CYRILLIC, false, "ru-RU", isGlobal = true),
             Language("it", "it", "Italian", "Italiano", "🇮🇹", LayoutType.QWERTY, false, "it-IT", isGlobal = true),
             Language("ja", "ja", "Japanese", "日本語", "🇯🇵", LayoutType.JAPANESE, false, "ja-JP", isGlobal = true),
             Language("ko", "ko", "Korean", "한국어", "🇰🇷", LayoutType.QWERTY, false, "ko-KR", isGlobal = true),
@@ -74,11 +75,23 @@ data class Language(
             Language("as", "as", "Assamese", "অসমীয়া", "🇮🇳", LayoutType.BENGALI, false, "bn-IN", isGlobal = false)
         )
 
+        val AUTO = Language(
+            id = "auto",
+            code = "auto",
+            displayName = "Auto-Detect",
+            nativeName = "Detect Language",
+            flagEmoji = "🌐",
+            layoutType = LayoutType.QWERTY,
+            isGlobal = true
+        )
+
         fun getById(id: String): Language {
+            if (id.equals("auto", ignoreCase = true)) return AUTO
             return ALL_LANGUAGES.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: ALL_LANGUAGES.first()
         }
 
         fun getByCode(code: String): Language {
+            if (code.equals("auto", ignoreCase = true)) return AUTO
             return ALL_LANGUAGES.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: ALL_LANGUAGES.first()
         }
     }

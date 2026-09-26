@@ -712,17 +712,19 @@ object TranslationMatrix {
             if (res != null) return res
         }
 
-        // 3. Match in Romanized / Hinglish / Marathlish dictionary
+        // 3. Match in Romanized / Indic dictionary
         if (romanizedIndicLookup.containsKey(normalizedWord)) {
             val res = romanizedIndicLookup[normalizedWord]?.get(normalizedTarget)
-                ?: romanizedIndicLookup[normalizedWord]?.get("hi")
-                ?: romanizedIndicLookup[normalizedWord]?.get("mr")
             if (res != null) return res
+            if (normalizedTarget in listOf("hi", "mr", "bn", "gu", "pa", "ta", "te", "kn", "ml", "ur")) {
+                val indicRes = romanizedIndicLookup[normalizedWord]?.get("hi") ?: romanizedIndicLookup[normalizedWord]?.get("mr")
+                if (indicRes != null) return indicRes
+            }
         }
 
-        // 4. Reverse lookup from non-English sources
+        // 4. Reverse lookup from non-English sources (Strictly direct: match sourceLang only)
         for ((engKey, trans) in singleWordDictionary) {
-            if (trans[normalizedSource]?.equals(clean, ignoreCase = true) == true || trans["hi"]?.equals(clean, ignoreCase = true) == true || trans["mr"]?.equals(clean, ignoreCase = true) == true) {
+            if (trans[normalizedSource]?.equals(clean, ignoreCase = true) == true) {
                 return if (normalizedTarget == "en") engKey else (trans[normalizedTarget] ?: clean)
             }
         }

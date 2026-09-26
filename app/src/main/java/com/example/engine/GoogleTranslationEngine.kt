@@ -28,9 +28,9 @@ object GoogleTranslationEngine {
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(6, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .writeTimeout(3, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -173,7 +173,7 @@ object GoogleTranslationEngine {
             }
         }
 
-        // 3. Fallback to offline dictionary
+        // 3. Fallback to offline matrix dictionary
         val fallback = TranslationMatrix.translateOffline(clean, sl, tl)
         translationCache[key] = fallback
         return@withContext fallback
@@ -188,16 +188,34 @@ object GoogleTranslationEngine {
      */
     private fun parseGoogleTranslateResponse(jsonString: String): String? {
         return try {
-            val jsonArray = JSONArray(jsonString)
+            val trimmed = jsonString.trim()
+            if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length > 2) {
+                return trimmed.substring(1, trimmed.length - 1)
+            }
+            val jsonArray = JSONArray(trimmed)
             val sb = StringBuilder()
             for (i in 0 until jsonArray.length()) {
                 when (val item = jsonArray.get(i)) {
-                    is String -> sb.append(item)
+                    is String -> {
+                        val str = item.trim()
+                        if (str.isNotBlank() && str != "en" && str != "auto") {
+                            if (sb.isNotEmpty() && !sb.endsWith(" ") && !str.startsWith(" ")) {
+                                sb.append(" ")
+                            }
+                            sb.append(str)
+                        }
+                    }
                     is JSONArray -> {
                         if (item.length() > 0) {
                             val inner = item.get(0)
                             if (inner is String) {
-                                sb.append(inner)
+                                val str = inner.trim()
+                                if (str.isNotBlank()) {
+                                    if (sb.isNotEmpty() && !sb.endsWith(" ") && !str.startsWith(" ")) {
+                                        sb.append(" ")
+                                    }
+                                    sb.append(str)
+                                }
                             }
                         }
                     }

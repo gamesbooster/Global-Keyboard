@@ -194,6 +194,19 @@ object KeyboardLayouts {
         listOf("%", "©", "®", "™", "✓", "[", "]", "<", ">")
     )
 
+    // CYRILLIC (Russian / Русский)
+    val CYRILLIC_ROWS = listOf(
+        listOf("й", "ц", "у", "к", "е", "н", "г", "ш", "щ", "з", "х", "ъ"),
+        listOf("ф", "ы", "в", "а", "п", "р", "о", "л", "д", "ж", "э"),
+        listOf("я", "ч", "с", "м", "и", "т", "ь", "б", "ю")
+    )
+
+    val CYRILLIC_SHIFTED_ROWS = listOf(
+        listOf("Й", "Ц", "У", "К", "Е", "Н", "Г", "Ш", "Щ", "З", "Х", "Ъ"),
+        listOf("Ф", "Ы", "В", "А", "П", "Р", "О", "Л", "Д", "Ж", "Э"),
+        listOf("Я", "Ч", "С", "М", "И", "Т", "Ь", "Б", "Ю")
+    )
+
     fun getRowsForLayout(layoutType: LayoutType, isShifted: Boolean = false): List<List<String>> {
         return if (isShifted) {
             when (layoutType) {
@@ -208,6 +221,7 @@ object KeyboardLayouts {
                 LayoutType.GURMUKHI -> GURMUKHI_SHIFTED_ROWS
                 LayoutType.ARABIC -> ARABIC_SHIFTED_ROWS
                 LayoutType.JAPANESE -> QWERTY_SHIFTED_ROWS
+                LayoutType.CYRILLIC -> CYRILLIC_SHIFTED_ROWS
             }
         } else {
             when (layoutType) {
@@ -222,6 +236,7 @@ object KeyboardLayouts {
                 LayoutType.GURMUKHI -> GURMUKHI_ROWS
                 LayoutType.ARABIC -> ARABIC_ROWS
                 LayoutType.JAPANESE -> QWERTY_ROWS
+                LayoutType.CYRILLIC -> CYRILLIC_ROWS
             }
         }
     }
@@ -237,7 +252,39 @@ object KeyboardLayouts {
             LayoutType.MALAYALAM -> MALAYALAM_QUICK_MATRAS
             LayoutType.GURMUKHI -> GURMUKHI_QUICK_MATRAS
             LayoutType.ARABIC -> ARABIC_QUICK_MATRAS
-            LayoutType.QWERTY, LayoutType.JAPANESE -> null
+            LayoutType.QWERTY, LayoutType.JAPANESE, LayoutType.CYRILLIC -> null
+        }
+    }
+
+    fun getSubSymbolForQWERTY(key: String): String? {
+        return when (key.lowercase()) {
+            "q" -> "1"
+            "w" -> "2"
+            "e" -> "3"
+            "r" -> "4"
+            "t" -> "5"
+            "y" -> "6"
+            "u" -> "7"
+            "i" -> "8"
+            "o" -> "9"
+            "p" -> "0"
+            "a" -> "@"
+            "s" -> "#"
+            "d" -> "$"
+            "f" -> "%"
+            "g" -> "&"
+            "h" -> "-"
+            "j" -> "+"
+            "k" -> "("
+            "l" -> ")"
+            "z" -> "*"
+            "x" -> "\""
+            "c" -> "'"
+            "v" -> ":"
+            "b" -> ";"
+            "n" -> "!"
+            "m" -> "?"
+            else -> null
         }
     }
 

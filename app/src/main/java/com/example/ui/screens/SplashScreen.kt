@@ -65,18 +65,25 @@ fun SplashScreen(
 
         // Voice output on splash
         if (voiceGuidanceEnabled) {
-            val welcomeText = AudioGuidanceHelper.getSplashAudioText(activeLanguage)
-            voiceTTSEngine.speak(welcomeText, activeLanguage.ttsLocaleTag)
+            try {
+                val welcomeText = AudioGuidanceHelper.getSplashAudioText(activeLanguage)
+                voiceTTSEngine.speak(welcomeText, activeLanguage.ttsLocaleTag)
+            } catch (_: Exception) {
+            }
         }
 
-        // Short premium transition delay (no fake loading)
-        delay(1600)
+        // Fast clean transition delay
+        delay(1000)
 
-        val isReady = ImeUtils.isKeyboardReady(context)
-        if (onboardingCompleted && isReady) {
+        try {
+            val isReady = ImeUtils.isKeyboardReady(context)
+            if (onboardingCompleted && isReady) {
+                onNavigateNext("dashboard")
+            } else {
+                onNavigateNext("onboarding")
+            }
+        } catch (_: Exception) {
             onNavigateNext("dashboard")
-        } else {
-            onNavigateNext("onboarding")
         }
     }
 

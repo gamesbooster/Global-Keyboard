@@ -87,6 +87,8 @@ fun DashboardScreen(
     val transliterationEnabled by preferences.transliterationEnabled.collectAsState()
     val emojiSuggestionsEnabled by preferences.emojiSuggestionsEnabled.collectAsState()
     val autoCorrection by preferences.autoCorrection.collectAsState()
+    val autoFixGrammar by preferences.autoFixGrammar.collectAsState()
+    val longPressSubSymbols by preferences.longPressSubSymbols.collectAsState()
     val autoCapitalization by preferences.autoCapitalization.collectAsState()
 
     // Mode, Entitlements and Credits
@@ -358,6 +360,7 @@ fun HomeTab(
                 }
             }
         }
+
 
         // 2. Primary 3D Feature Cards (6 grid cards + horizontal Smart Reply card)
         Column(
@@ -1510,6 +1513,8 @@ fun SettingsTab(
     val userEmail by preferences.userEmail.collectAsState()
     val userDisplayName by preferences.userDisplayName.collectAsState()
     val aiCredits by preferences.aiCredits.collectAsState()
+    val autoFixGrammar by preferences.autoFixGrammar.collectAsState()
+    val longPressSubSymbols by preferences.longPressSubSymbols.collectAsState()
     var showSignInSheet by remember { mutableStateOf(false) }
 
     val textColor = if (isDarkMode) NeumorphicColors.DarkTextPrimary else NeumorphicColors.LightTextPrimary
@@ -2300,6 +2305,48 @@ fun SettingsTab(
                         Switch(
                             checked = autoCapitalization,
                             onCheckedChange = { preferences.setAutoCapitalization(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Auto-Fix Grammar & Spelling
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-Fix Grammar", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Fix subject-verb agreement and contractions on punctuation", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = autoFixGrammar,
+                            onCheckedChange = { preferences.setAutoFixGrammar(it) },
+                            modifier = Modifier.scale(0.82f),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeumorphicColors.EmeraldAccent
+                            )
+                        )
+                    }
+
+                    // Long-Press for Sub-Symbols
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Long-Press for Symbols", fontWeight = FontWeight.SemiBold, color = textColor, fontSize = 13.sp)
+                            Text("Hold letter key for 180ms to insert secondary symbol", fontSize = 11.sp, color = textMuted)
+                        }
+                        Switch(
+                            checked = longPressSubSymbols,
+                            onCheckedChange = { preferences.setLongPressSubSymbols(it) },
                             modifier = Modifier.scale(0.82f),
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,

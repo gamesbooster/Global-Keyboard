@@ -21,6 +21,8 @@ class LingoKeyPreferences(context: Context) {
     // Keyboard Settings
     val autoCapitalization = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CAP, true))
     val autoCorrection = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CORRECT, true))
+    val autoFixGrammar = MutableStateFlow(prefs.getBoolean(KEY_AUTO_FIX_GRAMMAR, true))
+    val longPressSubSymbols = MutableStateFlow(prefs.getBoolean(KEY_LONG_PRESS_SUB_SYMBOLS, true))
     val showSuggestions = MutableStateFlow(prefs.getBoolean(KEY_SUGGESTIONS, true))
     val showNumberRow = MutableStateFlow(prefs.getBoolean(KEY_NUMBER_ROW, true))
     val transliterationEnabled = MutableStateFlow(prefs.getBoolean(KEY_TRANSLITERATION, false))
@@ -44,7 +46,8 @@ class LingoKeyPreferences(context: Context) {
     val defaultTone = MutableStateFlow(ToneType.valueOf(prefs.getString(KEY_DEFAULT_TONE, ToneType.PROFESSIONAL.name) ?: ToneType.PROFESSIONAL.name))
     val autoDetectLanguage = MutableStateFlow(prefs.getBoolean(KEY_AUTO_DETECT_LANG, true))
     val realtimeAutoTranslate = MutableStateFlow(prefs.getBoolean(KEY_REALTIME_AUTO_TRANSLATE, true))
-    val targetTranslationLanguage = MutableStateFlow(Language.getById(prefs.getString(KEY_TARGET_TRANSLATE_LANG, "hi") ?: "hi"))
+    val sourceTranslationLanguage = MutableStateFlow(Language.getById(prefs.getString(KEY_SOURCE_TRANSLATE_LANG, "auto") ?: "auto"))
+    val targetTranslationLanguage = MutableStateFlow(Language.getById(prefs.getString(KEY_TARGET_TRANSLATE_LANG, "en") ?: "en"))
     val saveAIHistory = MutableStateFlow(prefs.getBoolean(KEY_SAVE_AI_HISTORY, true))
 
     // Voice & Realtime TTS
@@ -172,10 +175,10 @@ class LingoKeyPreferences(context: Context) {
     }
 
     private fun loadEnabledLanguages(): List<Language> {
-        val raw = prefs.getString(KEY_ENABLED_LANGUAGES, "en,hi") ?: "en,hi"
+        val raw = prefs.getString(KEY_ENABLED_LANGUAGES, "en,es,fr,de") ?: "en,es,fr,de"
         val ids = raw.split(",").filter { it.isNotBlank() }
         val list = ids.map { Language.getById(it) }
-        return if (list.isEmpty()) listOf(Language.getById("en"), Language.getById("hi")) else list
+        return if (list.isEmpty()) listOf(Language.getById("en"), Language.getById("es"), Language.getById("fr"), Language.getById("de")) else list
     }
 
     private fun loadActiveLanguage(): Language {
@@ -191,6 +194,16 @@ class LingoKeyPreferences(context: Context) {
     fun setAutoCorrection(value: Boolean) {
         autoCorrection.value = value
         prefs.edit().putBoolean(KEY_AUTO_CORRECT, value).apply()
+    }
+
+    fun setAutoFixGrammar(value: Boolean) {
+        autoFixGrammar.value = value
+        prefs.edit().putBoolean(KEY_AUTO_FIX_GRAMMAR, value).apply()
+    }
+
+    fun setLongPressSubSymbols(value: Boolean) {
+        longPressSubSymbols.value = value
+        prefs.edit().putBoolean(KEY_LONG_PRESS_SUB_SYMBOLS, value).apply()
     }
 
     fun setShowSuggestions(value: Boolean) {
@@ -479,6 +492,13 @@ class LingoKeyPreferences(context: Context) {
         prefs.edit().putBoolean(KEY_REALTIME_AUTO_TRANSLATE, value).apply()
     }
 
+    fun setSourceTranslationLanguage(language: Language) {
+        sourceTranslationLanguage.value = language
+        prefs.edit()
+            .putString(KEY_SOURCE_TRANSLATE_LANG, language.id)
+            .apply()
+    }
+
     fun setTargetTranslationLanguage(language: Language) {
         targetTranslationLanguage.value = language
         realtimeAutoTranslate.value = true
@@ -682,8 +702,9 @@ class LingoKeyPreferences(context: Context) {
 
     /**
      * Persists Google Account profile and awards a +200 Welcome Cloud Bonus upon initial sign-in.
+     * Returns true if the 200 welcome bonus was awarded for this Google Account ID.
      */
-    fun saveGoogleAccount(id: String, email: String, displayName: String, photoUrl: String = "") {
+    fun saveGoogleAccount(id: String, email: String, displayName: String, photoUrl: String = ""): Boolean {
         isSignedIn.value = true
         userGoogleId.value = id
         userEmail.value = email
@@ -701,12 +722,14 @@ class LingoKeyPreferences(context: Context) {
             .putLong(KEY_CLOUD_SYNC_TIMESTAMP, now)
             .apply()
 
-        // Just-In-Time Welcome Bonus: Award +200 free cloud credits to newly linked accounts
-        val bonusKey = "pref_claimed_cloud_bonus_$id"
-        if (!prefs.getBoolean(bonusKey, false)) {
+        // 200 Free Welcome Credits Bonus on First Sign-In per unique Google Account ID
+        val bonusKey = "welcome_bonus_claimed_$id"
+        val isFirstClaim = !prefs.getBoolean(bonusKey, false)
+        if (isFirstClaim) {
             creditsManager.addCredits(200)
             prefs.edit().putBoolean(bonusKey, true).apply()
         }
+        return isFirstClaim
     }
 
     /**
@@ -777,6 +800,8 @@ class LingoKeyPreferences(context: Context) {
 
         private const val KEY_AUTO_CAP = "pref_auto_cap"
         private const val KEY_AUTO_CORRECT = "pref_auto_correct"
+        private const val KEY_AUTO_FIX_GRAMMAR = "pref_auto_fix_grammar"
+        private const val KEY_LONG_PRESS_SUB_SYMBOLS = "pref_long_press_sub_symbols"
         private const val KEY_SUGGESTIONS = "pref_suggestions"
         private const val KEY_NUMBER_ROW = "pref_number_row"
         private const val KEY_TRANSLITERATION = "pref_transliteration"
@@ -794,6 +819,7 @@ class LingoKeyPreferences(context: Context) {
         private const val KEY_DEFAULT_TONE = "pref_default_tone"
         private const val KEY_AUTO_DETECT_LANG = "pref_auto_detect_lang"
         private const val KEY_REALTIME_AUTO_TRANSLATE = "pref_realtime_auto_translate"
+        private const val KEY_SOURCE_TRANSLATE_LANG = "pref_source_translate_lang"
         private const val KEY_TARGET_TRANSLATE_LANG = "pref_target_translate_lang"
         private const val KEY_SAVE_AI_HISTORY = "pref_save_ai_history"
         private const val KEY_VOICE_GENDER = "pref_voice_gender"

@@ -14,6 +14,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -54,6 +55,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,7 +89,7 @@ fun ComposeKeyboardView(
     onOpenSettings: () -> Unit,
     onOpenThemesStore: () -> Unit = onOpenSettings,
     onMoveCursor: (Int) -> Unit = {},
-    onStartSpeechRecognition: (() -> Unit)? = null,
+    onStartSpeechRecognition: ((String?, String?, Boolean, Boolean) -> Unit)? = null,
     onStopSpeechRecognition: (() -> Unit)? = null,
     registerVoiceListener: (((VoiceTypingStatus, Float, String) -> Unit) -> Unit)? = null,
     onGetEditorInfo: () -> EditorInfo? = { null },
@@ -114,10 +119,13 @@ fun ComposeKeyboardView(
     val transliterationEnabled by preferences.transliterationEnabled.collectAsState()
     val emojiSuggestionsEnabled by preferences.emojiSuggestionsEnabled.collectAsState()
     val autoCorrection by preferences.autoCorrection.collectAsState()
+    val autoFixGrammar by preferences.autoFixGrammar.collectAsState()
+    val longPressSubSymbols by preferences.longPressSubSymbols.collectAsState()
     val keyVibration by preferences.keyVibration.collectAsState()
     val voiceGender by preferences.voiceGender.collectAsState()
     val realtimeTTSMode by preferences.realtimeTTSMode.collectAsState()
     val realtimeAutoTranslate by preferences.realtimeAutoTranslate.collectAsState()
+    val sourceTranslateLang by preferences.sourceTranslationLanguage.collectAsState()
     val targetTranslateLang by preferences.targetTranslationLanguage.collectAsState()
     val autoDetectLanguage by preferences.autoDetectLanguage.collectAsState()
     val keyHeightDp by preferences.keyHeightDp.collectAsState()
@@ -126,6 +134,7 @@ fun ComposeKeyboardView(
     val latestClip by clipboardRepository.latestClip.collectAsState()
     val isPremiumUser by preferences.isPremiumUser.collectAsState()
 
+    var isFloatingTranslateBarVisible by remember { mutableStateOf(false) }
     var keyboardMode by remember { mutableStateOf(KeyboardMode.ALPHABET) }
     var isShifted by remember { mutableStateOf(false) }
     var isCapsLock by remember { mutableStateOf(false) }
@@ -136,6 +145,7 @@ fun ComposeKeyboardView(
         mutableStateOf(SuggestionEngine.getCandidateStrip("", "", "en"))
     }
     var lastAutoCorrection by remember { mutableStateOf<AutoCorrectionRevertRecord?>(null) }
+    var lastSpaceTapTime by remember { mutableLongStateOf(0L) }
 
     // Quick Language Selector Sheet State
     var showLanguagePickerSheet by remember { mutableStateOf(false) }
@@ -152,6 +162,7 @@ fun ComposeKeyboardView(
     var voiceRmsLevel by remember { mutableStateOf(0f) }
     var voiceErrorMessage by remember { mutableStateOf<String?>(null) }
     var emojiPanelInitialTab by remember { mutableStateOf("EMOJI") }
+    var languagePanelInitialTab by remember { mutableStateOf("SOURCE") }
 
     // Register real-time voice recognition callbacks
     DisposableEffect(registerVoiceListener) {
@@ -192,16 +203,18 @@ fun ComposeKeyboardView(
     // Refresh suggestions asynchronously on Dispatchers.Default (Zero-Latency Typing)
     fun refreshSuggestions(composingWord: String) {
         suggestionJob?.cancel()
-        if (composingWord.isEmpty()) {
-            currentCandidateStrip = SuggestionEngine.getCandidateStrip("", "", activeLanguage.code)
-            suggestions = listOf("I", "Hello", "How", "Thank you")
-            return
-        }
-
         val context = onGetContextText().ifEmpty { lastCommittedWord }
         val langCode = activeLanguage.code
         val isTranslit = transliterationEnabled
         val isEmoji = emojiSuggestionsEnabled
+
+        if (composingWord.isEmpty()) {
+            val strip = SuggestionEngine.getCandidateStrip("", context, langCode)
+            val preds = SuggestionEngine.getSuggestions("", context, langCode)
+            currentCandidateStrip = strip
+            suggestions = preds
+            return
+        }
 
         suggestionJob = coroutineScope.launch(Dispatchers.Default) {
             val strip = SuggestionEngine.getCandidateStrip(composingWord, context, langCode)
@@ -244,6 +257,64 @@ fun ComposeKeyboardView(
         refreshSuggestions(currentComposingWord)
     }
 
+    // Fast debounced real-time translation for Translate Bar
+    LaunchedEffect(translateSourceText, sourceTranslateLang.code, targetTranslateLang.code, isFloatingTranslateBarVisible) {
+        if (!isFloatingTranslateBarVisible) return@LaunchedEffect
+        val clean = translateSourceText.trim()
+        if (clean.isEmpty()) {
+            translateResultText = ""
+            isTranslating = false
+            return@LaunchedEffect
+        }
+        val sl = sourceTranslateLang.code
+        val tl = targetTranslateLang.code
+
+        // 1. Fast cache/offline match in 0ms
+        val cached = GoogleTranslationEngine.getCached(clean, sl, tl)
+        if (!cached.isNullOrBlank()) {
+            translateResultText = cached
+            isTranslating = false
+            return@LaunchedEffect
+        }
+        val offline = TranslationMatrix.translateOffline(clean, sl, tl)
+        if (offline != clean && offline.isNotBlank()) {
+            translateResultText = offline
+        }
+
+        // 2. Debounce 90ms before hitting Google Translate online
+        delay(90)
+        isTranslating = true
+        try {
+            val online = GoogleTranslationEngine.translate(clean, sl, tl)
+            if (online.isNotBlank()) {
+                translateResultText = online
+            }
+        } catch (_: Exception) {
+            // Keep offline fallback
+        } finally {
+            isTranslating = false
+        }
+    }
+
+    // Sync voice recognition with floating translation bar
+    LaunchedEffect(voiceRecognizedText, isFloatingTranslateBarVisible) {
+        if (isFloatingTranslateBarVisible && voiceRecognizedText.isNotBlank()) {
+            if (voiceRecognizedText.contains("➔")) {
+                val parts = voiceRecognizedText.split("➔")
+                val src = parts.getOrNull(0)?.trim() ?: ""
+                val tgt = parts.getOrNull(1)?.trim() ?: ""
+                if (src.isNotBlank()) {
+                    translateSourceText = src
+                }
+                if (tgt.isNotBlank() && tgt != "...") {
+                    translateResultText = tgt
+                }
+            } else {
+                translateSourceText = voiceRecognizedText
+            }
+        }
+    }
+
     fun vibrate() {
         if (keyVibration) {
             try {
@@ -267,6 +338,10 @@ fun ComposeKeyboardView(
     fun handleKeyPress(char: String) {
         vibrate()
         lastAutoCorrection = null
+        if (isFloatingTranslateBarVisible) {
+            translateSourceText += char
+            return
+        }
         val textToCommit = char
 
         // INSTANT COMMIT TO INPUT CONNECTION (<1ms on UI thread)
@@ -277,6 +352,16 @@ fun ComposeKeyboardView(
 
         // Check if punctuation completes a word
         if (char in "\n\t.,!?") {
+            // Auto-fix grammar slips on punctuation if enabled (e.g. "dont." -> "don't.", "he go." -> "he goes.")
+            if (autoFixGrammar && char in ".,!?") {
+                val context = onGetContextText()
+                val fix = GrammarEngine.autoFixOnPunctuation(context)
+                if (fix != null) {
+                    onDeleteSurroundingText(fix.charsToReplace + textToCommit.length, 0)
+                    onCommitText("${fix.correctedPhrase}$char")
+                }
+            }
+
             val finishedWord = currentComposingWord.trim()
             if (finishedWord.isNotEmpty()) {
                 lastCommittedWord = finishedWord
@@ -330,6 +415,12 @@ fun ComposeKeyboardView(
 
     fun handleBackspace() {
         vibrate()
+        if (isFloatingTranslateBarVisible) {
+            if (translateSourceText.isNotEmpty()) {
+                translateSourceText = translateSourceText.dropLast(1)
+            }
+            return
+        }
         if (lastAutoCorrection != null) {
             // Gboard-grade Backspace Revert: revert autocorrection back to user's literal typed input
             val revert = lastAutoCorrection!!
@@ -353,6 +444,16 @@ fun ComposeKeyboardView(
     fun handleDeleteWord() {
         vibrate()
         lastAutoCorrection = null
+        if (isFloatingTranslateBarVisible) {
+            if (translateSourceText.isNotEmpty()) {
+                val trimmed = translateSourceText.trimEnd()
+                val trailingSpaces = translateSourceText.length - trimmed.length
+                val lastWordLen = trimmed.takeLastWhile { !it.isWhitespace() }.length
+                val toDrop = (trailingSpaces + lastWordLen).coerceAtLeast(1)
+                translateSourceText = translateSourceText.dropLast(toDrop)
+            }
+            return
+        }
         val contextBefore = onGetContextText()
         if (contextBefore.isNotEmpty()) {
             val trimmed = contextBefore.trimEnd()
@@ -369,7 +470,33 @@ fun ComposeKeyboardView(
 
     fun handleSpace() {
         vibrate()
+        if (isFloatingTranslateBarVisible) {
+            if (translateSourceText.isNotEmpty() && !translateSourceText.endsWith(" ")) {
+                translateSourceText += " "
+            }
+            return
+        }
         var wordToProcess = currentComposingWord.trim()
+
+        if (wordToProcess.isEmpty()) {
+            val now = System.currentTimeMillis()
+            if (now - lastSpaceTapTime < 360L && lastSpaceTapTime > 0L) {
+                // Gboard double-space shortcut: converts previous space into period and space
+                lastSpaceTapTime = 0L
+                onDeleteSurroundingText(1, 0)
+                onCommitText(". ")
+                if (!isCapsLock) {
+                    isShifted = true
+                }
+                refreshSuggestions("")
+                return
+            }
+            lastSpaceTapTime = now
+            onCommitText(" ")
+            refreshSuggestions("")
+            return
+        }
+        lastSpaceTapTime = System.currentTimeMillis()
 
         // 1. Auto-detection on space offloaded to background
         if (autoDetectLanguage && wordToProcess.length >= 2) {
@@ -394,9 +521,25 @@ fun ComposeKeyboardView(
                 lastAutoCorrection = null
             }
         } else if (autoCorrection && wordToProcess.isNotEmpty()) {
-            // 3. Spacebar Auto-Commit (Gboard-grade zero-latency auto-correction)
+            // 3. Spacebar Auto-Commit (Gboard-grade zero-latency auto-correction & grammar fix)
             val candidate = currentCandidateStrip
-            if (candidate.isAutoCorrection && candidate.primary.isNotBlank() && !candidate.primary.equals(wordToProcess, ignoreCase = true)) {
+            val grammarFix = candidate.grammarFix
+            if (autoFixGrammar && grammarFix != null && (grammarFix.explanation.contains("contraction", ignoreCase = true) || grammarFix.explanation.contains("apostrophe", ignoreCase = true) || grammarFix.originalPhrase.equals("i", ignoreCase = true))) {
+                onDeleteSurroundingText(grammarFix.charsToReplace, 0)
+                onCommitText("${grammarFix.correctedPhrase} ")
+                lastAutoCorrection = AutoCorrectionRevertRecord(
+                    originalTyped = grammarFix.originalPhrase,
+                    correctedWord = grammarFix.correctedPhrase,
+                    committedLength = grammarFix.correctedPhrase.length + 1
+                )
+                lastCommittedWord = grammarFix.correctedPhrase
+                coroutineScope.launch(Dispatchers.Default) {
+                    SuggestionEngine.learnWord(grammarFix.correctedPhrase)
+                }
+                currentComposingWord = ""
+                refreshSuggestions("")
+                return
+            } else if (candidate.isAutoCorrection && candidate.primary.isNotBlank() && !candidate.primary.equals(wordToProcess, ignoreCase = true)) {
                 val corrected = candidate.primary
                 onDeleteSurroundingText(currentComposingWord.length, 0)
                 onCommitText("$corrected ")
@@ -465,26 +608,114 @@ fun ComposeKeyboardView(
         Modifier.background(currentTheme.backgroundColor)
     }
 
-    Column(
+    var activeLangDropdown by remember { mutableStateOf<String?>(null) }
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .then(backgroundModifier)
             .navigationBarsPadding()
             .padding(bottom = 6.dp)
     ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
         // ACTIVE TOOL STATE (Determines which 3D Neumorphic chip is glowing and handles 1st-click open / 2nd-click close)
-        val activeToolId = when (keyboardMode) {
-            KeyboardMode.TOOLS_PANEL -> "tools"
-            KeyboardMode.AI_PANEL -> "ai"
-            KeyboardMode.TRANSLATE_PANEL -> "translate"
-            KeyboardMode.VOICE_PANEL -> "voice"
-            KeyboardMode.CLIPBOARD -> "clipboard"
-            KeyboardMode.SMART_REPLY_PANEL -> "smart_reply"
-            KeyboardMode.EMOJI -> if (emojiPanelInitialTab == "STICKER") "stickers" else "emoji"
-            KeyboardMode.LANGUAGE_PANEL -> "languages"
-            KeyboardMode.NUMERIC_PAD -> "numpad"
-            KeyboardMode.TOOLBAR_CUSTOMIZE -> "customize"
+        val activeToolId = when {
+            isFloatingTranslateBarVisible -> "translate"
+            keyboardMode == KeyboardMode.TOOLS_PANEL -> "tools"
+            keyboardMode == KeyboardMode.AI_PANEL -> "ai"
+            keyboardMode == KeyboardMode.TRANSLATE_PANEL -> "translate"
+            keyboardMode == KeyboardMode.VOICE_PANEL -> "voice"
+            keyboardMode == KeyboardMode.CLIPBOARD -> "clipboard"
+            keyboardMode == KeyboardMode.SMART_REPLY_PANEL -> "smart_reply"
+            keyboardMode == KeyboardMode.EMOJI -> if (emojiPanelInitialTab == "STICKER") "stickers" else "emoji"
+            keyboardMode == KeyboardMode.LANGUAGE_PANEL -> "languages"
+            keyboardMode == KeyboardMode.NUMERIC_PAD -> "numpad"
+            keyboardMode == KeyboardMode.TOOLBAR_CUSTOMIZE -> "customize"
             else -> null
+        }
+
+        // Gboard-Style Floating Translation Bar (Rendered ABOVE Toolbar, exactly like Gboard)
+        if (isFloatingTranslateBarVisible) {
+            GboardFloatingTranslateBar(
+                theme = currentTheme,
+                sourceLang = sourceTranslateLang,
+                targetLang = targetTranslateLang,
+                sourceText = translateSourceText,
+                resultText = translateResultText,
+                isTranslating = isTranslating,
+                voiceStatus = voiceStatus,
+                voiceRmsLevel = voiceRmsLevel,
+                allLanguages = Language.ALL_LANGUAGES,
+                onSourceLangChange = { lang: Language ->
+                    preferences.setSourceTranslationLanguage(lang)
+                    if (translateSourceText.isNotBlank()) {
+                        translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, lang.code, targetTranslateLang.code)
+                    }
+                },
+                onTargetLangChange = { lang: Language ->
+                    preferences.setTargetTranslationLanguage(lang)
+                    if (translateSourceText.isNotBlank()) {
+                        translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, sourceTranslateLang.code, lang.code)
+                    }
+                },
+                onSwapLanguages = {
+                    activeLangDropdown = null
+                    if (sourceTranslateLang.id == "auto") {
+                        val newSource = targetTranslateLang
+                        val newTarget = Language.getById("en")
+                        preferences.setSourceTranslationLanguage(newSource)
+                        preferences.setTargetTranslationLanguage(newTarget)
+                    } else {
+                        val newSource = targetTranslateLang
+                        val newTarget = sourceTranslateLang
+                        preferences.setSourceTranslationLanguage(newSource)
+                        preferences.setTargetTranslationLanguage(newTarget)
+                    }
+                    val oldRes = translateResultText
+                    translateResultText = translateSourceText
+                    translateSourceText = oldRes
+                    if (translateSourceText.isNotBlank()) {
+                        translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, sourceTranslateLang.code, targetTranslateLang.code)
+                    }
+                },
+                onSourceTextChange = { newText: String ->
+                    translateSourceText = newText
+                    if (newText.isNotBlank()) {
+                        translateResultText = GoogleTranslationEngine.translateFast(newText, sourceTranslateLang.code, targetTranslateLang.code)
+                    } else {
+                        translateResultText = ""
+                    }
+                },
+                onCommitTranslation = { textToInsert: String ->
+                    onCommitText("$textToInsert ")
+                    translateSourceText = ""
+                    translateResultText = ""
+                },
+                onToggleVoiceTranslate = {
+                    if (voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING) {
+                        onStopSpeechRecognition?.invoke()
+                    } else {
+                        onStartSpeechRecognition?.invoke(sourceTranslateLang.id, targetTranslateLang.id, true, false)
+                    }
+                },
+                onClear = {
+                    translateSourceText = ""
+                    translateResultText = ""
+                },
+                onClose = {
+                    activeLangDropdown = null
+                    isFloatingTranslateBarVisible = false
+                    onStopSpeechRecognition?.invoke()
+                    translateSourceText = ""
+                    translateResultText = ""
+                },
+                activeDropdown = activeLangDropdown,
+                onToggleDropdown = { type ->
+                    activeLangDropdown = if (activeLangDropdown == type) null else type
+                }
+            )
         }
 
         // UNIFIED 3D NEUMORPHIC TOOLBAR & GBOARD CANDIDATE STRIP
@@ -499,6 +730,7 @@ fun ComposeKeyboardView(
             toolbarItems = toolbarItems,
             latestClip = latestClip,
             activeToolId = activeToolId,
+            voiceStatus = voiceStatus,
             onToggleLeftGrid = {
                 vibrate()
                 if (keyboardMode != KeyboardMode.ALPHABET) {
@@ -512,6 +744,14 @@ fun ComposeKeyboardView(
                 lastAutoCorrection = null
                 onCommitText(clip)
                 clipboardRepository.dismissLatestClip()
+            },
+            onCommitGrammarFix = { fix ->
+                vibrate()
+                onDeleteSurroundingText(fix.charsToReplace, 0)
+                onCommitText("${fix.correctedPhrase} ")
+                lastAutoCorrection = null
+                currentComposingWord = ""
+                refreshSuggestions("")
             },
             onCommitCandidate = { word, isDirectTranslation, isLiteral ->
                 vibrate()
@@ -577,31 +817,39 @@ fun ComposeKeyboardView(
             },
             onOpenTranslate = {
                 vibrate()
-                if (keyboardMode == KeyboardMode.TRANSLATE_PANEL) {
+                isFloatingTranslateBarVisible = !isFloatingTranslateBarVisible
+                if (isFloatingTranslateBarVisible) {
                     keyboardMode = KeyboardMode.ALPHABET
-                } else {
-                    keyboardMode = KeyboardMode.TRANSLATE_PANEL
                     translateSourceText = onGetContextText()
                     if (translateSourceText.isNotBlank()) {
-                        translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, activeLanguage.code, targetTranslateLang.code)
+                        translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, sourceTranslateLang.code, targetTranslateLang.code)
                         coroutineScope.launch {
                             isTranslating = true
-                            val online = GoogleTranslationEngine.translate(translateSourceText, activeLanguage.code, targetTranslateLang.code)
+                            val online = GoogleTranslationEngine.translate(translateSourceText, sourceTranslateLang.code, targetTranslateLang.code)
                             translateResultText = online
                             isTranslating = false
                         }
                     }
+                } else {
+                    onStopSpeechRecognition?.invoke()
                 }
             },
             onOpenVoice = {
                 vibrate()
-                if (keyboardMode == KeyboardMode.VOICE_PANEL) {
-                    keyboardMode = KeyboardMode.ALPHABET
+                if (isFloatingTranslateBarVisible) {
+                    if (voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING) {
+                        onStopSpeechRecognition?.invoke()
+                    } else {
+                        onStartSpeechRecognition?.invoke(sourceTranslateLang.id, targetTranslateLang.id, true, false)
+                    }
                 } else {
-                    keyboardMode = KeyboardMode.VOICE_PANEL
                     voiceRecognizedText = ""
                     voiceErrorMessage = null
-                    onStartSpeechRecognition?.invoke()
+                    if (voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING) {
+                        onStopSpeechRecognition?.invoke()
+                    } else {
+                        onStartSpeechRecognition?.invoke(activeLanguage.id, targetTranslateLang.id, realtimeAutoTranslate, true)
+                    }
                 }
             },
             onOpenSettings = onOpenSettings,
@@ -636,6 +884,7 @@ fun ComposeKeyboardView(
                 if (keyboardMode == KeyboardMode.LANGUAGE_PANEL) {
                     keyboardMode = KeyboardMode.ALPHABET
                 } else {
+                    languagePanelInitialTab = "SOURCE"
                     keyboardMode = KeyboardMode.LANGUAGE_PANEL
                 }
             },
@@ -688,21 +937,29 @@ fun ComposeKeyboardView(
                         theme = currentTheme,
                         onOpenSmartReply = { keyboardMode = KeyboardMode.SMART_REPLY_PANEL },
                         onOpenTranslate = {
-                            keyboardMode = KeyboardMode.TRANSLATE_PANEL
+                            keyboardMode = KeyboardMode.ALPHABET
+                            isFloatingTranslateBarVisible = true
                             translateSourceText = onGetContextText()
+                            if (translateSourceText.isNotBlank()) {
+                                translateResultText = GoogleTranslationEngine.translateFast(translateSourceText, sourceTranslateLang.code, targetTranslateLang.code)
+                            }
                         },
                         onOpenVoice = {
-                            keyboardMode = KeyboardMode.VOICE_PANEL
+                            keyboardMode = KeyboardMode.ALPHABET
+                            isFloatingTranslateBarVisible = true
                             voiceRecognizedText = ""
                             voiceErrorMessage = null
-                            onStartSpeechRecognition?.invoke()
+                            onStartSpeechRecognition?.invoke(sourceTranslateLang.id, targetTranslateLang.id, true, false)
                         },
                         onOpenClipboard = { keyboardMode = KeyboardMode.CLIPBOARD },
                         onOpenAI = { keyboardMode = KeyboardMode.AI_PANEL; aiActionState = AIState.Idle },
                         onOpenThemes = {
                             onOpenThemesStore()
                         },
-                        onOpenLanguages = { keyboardMode = KeyboardMode.LANGUAGE_PANEL },
+                        onOpenLanguages = {
+                            languagePanelInitialTab = "SOURCE"
+                            keyboardMode = KeyboardMode.LANGUAGE_PANEL
+                        },
                         onOpenSettings = onOpenSettings,
                         onOpenCustomizeToolbar = { keyboardMode = KeyboardMode.TOOLBAR_CUSTOMIZE },
                         onOpenNumericPad = { keyboardMode = KeyboardMode.NUMERIC_PAD },
@@ -901,11 +1158,11 @@ fun ComposeKeyboardView(
                         onSelectLanguage = { newLang ->
                             preferences.setActiveLanguage(newLang)
                             voiceErrorMessage = null
-                            onStartSpeechRecognition?.invoke()
+                            onStartSpeechRecognition?.invoke(newLang.id, targetTranslateLang.id, false, false)
                         },
                         onStartListening = {
                             voiceErrorMessage = null
-                            onStartSpeechRecognition?.invoke()
+                            onStartSpeechRecognition?.invoke(activeLanguage.id, targetTranslateLang.id, false, false)
                         },
                         onStopListening = {
                             onStopSpeechRecognition?.invoke()
@@ -972,14 +1229,19 @@ fun ComposeKeyboardView(
                         theme = currentTheme,
                         activeLanguage = activeLanguage,
                         targetLanguage = targetTranslateLang,
+                        initialTab = languagePanelInitialTab,
                         onSelectSourceLanguage = { lang ->
                             preferences.setAutoDetectLanguage(false)
                             preferences.setActiveLanguage(lang)
-                            voiceTTSEngine.speak("Language set to ${lang.displayName}", lang.ttsLocaleTag)
+                            try {
+                                voiceTTSEngine.speak("Language set to ${lang.displayName}", lang.ttsLocaleTag)
+                            } catch (_: Exception) {}
                         },
                         onSelectTargetLanguage = { lang ->
                             preferences.setTargetTranslationLanguage(lang)
-                            voiceTTSEngine.speak("Translating to ${lang.displayName}", lang.ttsLocaleTag)
+                            try {
+                                voiceTTSEngine.speak("Translating to ${lang.displayName}", lang.ttsLocaleTag)
+                            } catch (_: Exception) {}
                         },
                         onClose = { keyboardMode = KeyboardMode.ALPHABET },
                         panelHeight = standardPanelHeight
@@ -998,12 +1260,26 @@ fun ComposeKeyboardView(
                         onEnter = {
                             vibrate()
                             lastAutoCorrection = null
-                            val finishedWord = currentComposingWord.trim()
-                            if (finishedWord.isNotEmpty()) {
-                                triggerWordTTS(finishedWord, isTranslated = realtimeAutoTranslate)
-                                currentComposingWord = ""
+                            if (isFloatingTranslateBarVisible) {
+                                if (translateResultText.isNotBlank()) {
+                                    onCommitText("$translateResultText ")
+                                    triggerWordTTS(translateResultText, isTranslated = true)
+                                    translateSourceText = ""
+                                    translateResultText = ""
+                                } else if (translateSourceText.isNotBlank()) {
+                                    onCommitText("$translateSourceText ")
+                                    translateSourceText = ""
+                                } else {
+                                    onPerformEditorAction()
+                                }
+                            } else {
+                                val finishedWord = currentComposingWord.trim()
+                                if (finishedWord.isNotEmpty()) {
+                                    triggerWordTTS(finishedWord, isTranslated = realtimeAutoTranslate)
+                                    currentComposingWord = ""
+                                }
+                                onPerformEditorAction()
                             }
-                            onPerformEditorAction()
                         },
                         onSwitchMode = { newMode ->
                             vibrate()
@@ -1171,14 +1447,10 @@ fun ComposeKeyboardView(
                                     }
                                 }
 
-                                // Normal character keys with Gboard-style top hints on alphabet row 0
+                                // Normal character keys with Gboard-style top hints on alphabet keys
                                 for (key in rowKeys) {
-                                    val topHint = if (keyboardMode == KeyboardMode.ALPHABET && rowIndex == 0 && activeLanguage.layoutType == LayoutType.QWERTY) {
-                                        when (key.lowercase()) {
-                                             "q" -> "1"; "w" -> "2"; "e" -> "3"; "r" -> "4"; "t" -> "5"
-                                            "y" -> "6"; "u" -> "7"; "i" -> "8"; "o" -> "9"; "p" -> "0"
-                                            else -> null
-                                        }
+                                    val topHint = if (keyboardMode == KeyboardMode.ALPHABET && activeLanguage.layoutType == LayoutType.QWERTY && longPressSubSymbols) {
+                                        KeyboardLayouts.getSubSymbolForQWERTY(key)
                                     } else null
 
                                     KeyButton(
@@ -1188,7 +1460,13 @@ fun ComposeKeyboardView(
                                         topHint = topHint,
                                         height = currentKeyHeight,
                                         showPreview = keyPreviewEnabled,
-                                        onClick = { handleKeyPress(key) }
+                                        enableLongPressSubSymbol = longPressSubSymbols,
+                                        onClick = { handleKeyPress(key) },
+                                        onInsertSubSymbol = { symbol ->
+                                            vibrate()
+                                            onDeleteSurroundingText(1, 0)
+                                            handleKeyPress(symbol)
+                                        }
                                     )
                                 }
 
@@ -1263,12 +1541,26 @@ fun ComposeKeyboardView(
                             onEnter = {
                                 vibrate()
                                 lastAutoCorrection = null
-                                val finishedWord = currentComposingWord.trim()
-                                if (finishedWord.isNotEmpty()) {
-                                    triggerWordTTS(finishedWord, isTranslated = realtimeAutoTranslate)
-                                    currentComposingWord = ""
+                                if (isFloatingTranslateBarVisible) {
+                                    if (translateResultText.isNotBlank()) {
+                                        onCommitText("$translateResultText ")
+                                        triggerWordTTS(translateResultText, isTranslated = true)
+                                        translateSourceText = ""
+                                        translateResultText = ""
+                                    } else if (translateSourceText.isNotBlank()) {
+                                        onCommitText("$translateSourceText ")
+                                        translateSourceText = ""
+                                    } else {
+                                        onPerformEditorAction()
+                                    }
+                                } else {
+                                    val finishedWord = currentComposingWord.trim()
+                                    if (finishedWord.isNotEmpty()) {
+                                        triggerWordTTS(finishedWord, isTranslated = realtimeAutoTranslate)
+                                        currentComposingWord = ""
+                                    }
+                                    onPerformEditorAction()
                                 }
-                                onPerformEditorAction()
                             }
                         )
                     }
@@ -1794,6 +2086,73 @@ fun SuggestionBar(
             }
         }
     }
+
+    // FLOATING DROPDOWN LANGUAGE SLIP DRAWER (Compact frosted-glass slip directly beneath pressed chip)
+    if (activeLangDropdown != null && isFloatingTranslateBarVisible) {
+        // Invisible touch barrier outside the slip to close on tap-outside
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(99f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    activeLangDropdown = null
+                }
+        )
+
+        val isTarget = activeLangDropdown == "TARGET"
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .zIndex(100f)
+                .padding(
+                    top = 44.dp, // Positioned directly beneath the translate bar chip row
+                    start = if (!isTarget) 10.dp else 0.dp,
+                    end = if (isTarget) 10.dp else 0.dp
+                ),
+            contentAlignment = if (isTarget) Alignment.TopEnd else Alignment.TopStart
+        ) {
+            FloatingDropdownLanguageSlip(
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    // Consume click so tap-outside dismiss doesn't trigger on the drawer itself
+                },
+                isTarget = isTarget,
+                currentLanguage = if (isTarget) targetTranslateLang else sourceTranslateLang,
+                languages = Language.ALL_LANGUAGES,
+                theme = currentTheme,
+                onSelectLanguage = { selected: Language ->
+                    vibrate()
+                    if (isTarget) {
+                        preferences.setTargetTranslationLanguage(selected)
+                        if (translateSourceText.isNotBlank()) {
+                            translateResultText = GoogleTranslationEngine.translateFast(
+                                translateSourceText,
+                                sourceTranslateLang.code,
+                                selected.code
+                            )
+                        }
+                    } else {
+                        preferences.setSourceTranslationLanguage(selected)
+                        if (translateSourceText.isNotBlank()) {
+                            translateResultText = GoogleTranslationEngine.translateFast(
+                                translateSourceText,
+                                selected.code,
+                                targetTranslateLang.code
+                            )
+                        }
+                    }
+                    activeLangDropdown = null
+                },
+                onDismiss = { activeLangDropdown = null }
+            )
+        }
+    }
+}
 }
 
 @Composable
@@ -1808,8 +2167,10 @@ fun UnifiedGboardTopStrip(
     toolbarItems: List<String>,
     latestClip: String? = null,
     activeToolId: String? = null,
+    voiceStatus: VoiceTypingStatus = VoiceTypingStatus.IDLE,
     onToggleLeftGrid: () -> Unit = {},
     onPasteClip: (String) -> Unit = {},
+    onCommitGrammarFix: ((com.example.engine.GrammarEngine.GrammarSuggestion) -> Unit)? = null,
     onCommitCandidate: (word: String, isDirectTranslation: Boolean, isLiteral: Boolean) -> Unit,
     onOpenEmoji: () -> Unit,
     onOpenTools: () -> Unit,
@@ -1848,11 +2209,11 @@ fun UnifiedGboardTopStrip(
         }
     }
 
-    // 3D Neumorphic Dark Glass Toolbar Background & Top Specular Glow Rim
+    // Dynamic Theme-Aware Toolbar Styling
     val topStripBgBrush = Brush.verticalGradient(
         colors = listOf(
-            Color(0xFF0F172A).copy(alpha = 0.96f),
-            Color(0xFF020617).copy(alpha = 0.98f)
+            theme.surfaceColor.copy(alpha = 0.95f),
+            theme.backgroundColor.copy(alpha = 0.98f)
         )
     )
 
@@ -1865,9 +2226,9 @@ fun UnifiedGboardTopStrip(
                 width = 0.8.dp,
                 brush = Brush.horizontalGradient(
                     listOf(
-                        Color(0x1534D399),
-                        Color(0x3534D399),
-                        Color(0x1534D399)
+                        theme.accentColor.copy(alpha = 0.15f),
+                        theme.accentColor.copy(alpha = 0.35f),
+                        theme.accentColor.copy(alpha = 0.15f)
                     )
                 ),
                 shape = RectangleShape
@@ -1875,8 +2236,8 @@ fun UnifiedGboardTopStrip(
             .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (isTyping && !forceShowTools && activeToolId == null) {
-            // WHEN TYPING: Left 3D Grid Toggle + Gboard 3-Candidate Strip + Right 3D Voice Mic
+        if (!forceShowTools && activeToolId == null) {
+            // Left 3D Grid Toggle + Gboard 3-Candidate Strip + Right 3D Voice Mic
             NeumorphicToggleGridButton(
                 isActive = false,
                 theme = theme,
@@ -1891,82 +2252,72 @@ fun UnifiedGboardTopStrip(
                     .fillMaxHeight(),
                 contentAlignment = Alignment.Center
             ) {
-                if (!latestClip.isNullOrBlank()) {
-                    // 3D Neumorphic Centered Clipboard Suggestion Pill
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E293B).copy(alpha = 0.85f),
-                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f)),
+                // 3D Gboard 3-Candidate Suggestion Strip (paste capsule completely removed per user request)
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // LEFT SLOT: Literal typed text
+                    val literalText = candidateResult.literal.ifEmpty { currentComposingWord }
+                    Box(
                         modifier = Modifier
-                            .height(42.dp)
-                            .clickable { onPasteClip(latestClip) }
+                            .weight(1.0f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.keyColor.copy(alpha = 0.6f))
+                            .clickable { onCommitCandidate(literalText, false, true) }
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.ContentPaste,
-                                contentDescription = "Clipboard item",
-                                tint = Color(0xFF34D399),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = latestClip.replace("\n", " ").trim().take(20),
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "Paste",
-                                color = Color(0xFF34D399),
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                } else {
-                    // 3D Gboard 3-Candidate Suggestion Strip
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // LEFT SLOT: Literal typed text
-                        val literalText = candidateResult.literal.ifEmpty { currentComposingWord }
-                        Box(
-                            modifier = Modifier
-                                .weight(1.0f)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF1E293B).copy(alpha = 0.6f))
-                                .clickable { onCommitCandidate(literalText, false, true) }
-                                .padding(horizontal = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (currentComposingWord.isNotEmpty()) "“$literalText”" else literalText,
-                                color = Color(0xFFCBD5E1),
-                                fontSize = 13.sp,
-                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        // Divider 1
-                        Box(
-                            modifier = Modifier
-                                .width(1.dp)
-                                .height(20.dp)
-                                .background(Color.White.copy(alpha = 0.15f))
+                        Text(
+                            text = if (currentComposingWord.isNotEmpty()) "“$literalText”" else literalText,
+                            color = theme.textColor.copy(alpha = 0.75f),
+                            fontSize = 13.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                    }
 
-                        // CENTER SLOT: Primary Candidate / Auto-Correction
+                    // Divider 1
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(20.dp)
+                            .background(theme.textColor.copy(alpha = 0.15f))
+                    )
+
+                    // CENTER SLOT: Real-time Grammar Repair Chip OR Primary Candidate / Auto-Correction
+                    val grammarFix = candidateResult.grammarFix
+                    if (grammarFix != null && onCommitGrammarFix != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF0F766E).copy(alpha = 0.95f),
+                            border = BorderStroke(1.2.dp, Color(0xFF2DD4BF)),
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .fillMaxHeight()
+                                .clickable { onCommitGrammarFix(grammarFix) }
+                                .padding(horizontal = 2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "✨ ${grammarFix.correctedPhrase}",
+                                    color = Color.White,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
                         val primaryText = candidateResult.primary.ifEmpty { currentComposingWord }
                         val isAutoCorrection = candidateResult.isAutoCorrection
                         Box(
@@ -1975,12 +2326,12 @@ fun UnifiedGboardTopStrip(
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (isAutoCorrection) Color(0xFF10B981).copy(alpha = 0.22f)
-                                    else Color(0xFF1E293B).copy(alpha = 0.85f)
+                                    if (isAutoCorrection) theme.accentColor.copy(alpha = 0.22f)
+                                    else theme.keyColor.copy(alpha = 0.85f)
                                 )
                                 .border(
                                     width = if (isAutoCorrection) 1.2.dp else 0.8.dp,
-                                    color = if (isAutoCorrection) Color(0xFF34D399).copy(alpha = 0.7f) else Color.White.copy(alpha = 0.12f),
+                                    color = if (isAutoCorrection) theme.accentColor.copy(alpha = 0.7f) else theme.textColor.copy(alpha = 0.12f),
                                     shape = RoundedCornerShape(10.dp)
                                 )
                                 .clickable { onCommitCandidate(primaryText, false, false) }
@@ -1993,7 +2344,7 @@ fun UnifiedGboardTopStrip(
                             ) {
                                 Text(
                                     text = primaryText,
-                                    color = Color.White,
+                                    color = theme.textColor,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -2004,72 +2355,72 @@ fun UnifiedGboardTopStrip(
                                         modifier = Modifier
                                             .size(4.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF34D399))
+                                            .background(theme.accentColor)
                                     )
                                 }
                             }
                         }
+                    }
 
-                        // Divider 2
+                    // Divider 2
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(20.dp)
+                            .background(theme.textColor.copy(alpha = 0.15f))
+                    )
+
+                    // RIGHT SLOT: Live Translation OR Alternative Candidate
+                    val currentTrans = liveTrans
+                    if (currentTrans != null && currentComposingWord.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = theme.accentColor,
+                            border = BorderStroke(1.dp, theme.accentColor.copy(alpha = 0.8f)),
+                            modifier = Modifier
+                                .weight(1.05f)
+                                .fillMaxHeight()
+                                .clickable { onCommitCandidate(currentTrans, true, false) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "✨ $currentTrans",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    } else {
+                        val altText = candidateResult.alternative.ifEmpty { "" }
                         Box(
                             modifier = Modifier
-                                .width(1.dp)
-                                .height(20.dp)
-                                .background(Color.White.copy(alpha = 0.15f))
-                        )
-
-                        // RIGHT SLOT: Live Translation OR Alternative Candidate
-                        val currentTrans = liveTrans
-                        if (currentTrans != null && currentComposingWord.isNotEmpty()) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFF6366F1),
-                                border = BorderStroke(1.dp, Color(0xFF818CF8)),
-                                modifier = Modifier
-                                    .weight(1.05f)
-                                    .fillMaxHeight()
-                                    .clickable { onCommitCandidate(currentTrans, true, false) }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 4.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "✨ $currentTrans",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        } else {
-                            val altText = candidateResult.alternative.ifEmpty { "" }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1.0f)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (altText.isNotEmpty()) Color(0xFF1E293B).copy(alpha = 0.6f)
-                                        else Color.Transparent
-                                    )
-                                    .clickable(enabled = altText.isNotEmpty()) { onCommitCandidate(altText, false, false) }
-                                    .padding(horizontal = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (altText.isNotEmpty()) {
-                                    Text(
-                                        text = altText,
-                                        color = Color(0xFFCBD5E1),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                .weight(1.0f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (altText.isNotEmpty()) theme.keyColor.copy(alpha = 0.6f)
+                                    else Color.Transparent
+                                )
+                                .clickable(enabled = altText.isNotEmpty()) { onCommitCandidate(altText, false, false) }
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (altText.isNotEmpty()) {
+                                Text(
+                                    text = altText,
+                                    color = theme.textColor.copy(alpha = 0.75f),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -2079,23 +2430,27 @@ fun UnifiedGboardTopStrip(
             Spacer(modifier = Modifier.width(6.dp))
 
             // Right: 3D Voice Mic
+            val isVoiceActive = voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING
             NeumorphicToggleGridButton(
-                isActive = false,
+                isActive = isVoiceActive,
                 theme = theme,
+                icon = Icons.Default.Mic,
                 onClick = { onOpenVoice() }
             )
         } else {
-            // FULL 3D NEUMORPHIC TOOLBAR: Left dedicated 3D squircle toggle + scrollable 3D pill buttons
+            // FULL 3D NEUMORPHIC TOOLBAR:
+            // Left dedicated Tools toggle + Center scrollable quick action chips + Far-right Settings gear
             val scrollState = rememberScrollState()
 
             Row(
                 modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Far Left: Dedicated 3D Neumorphic 4-Square Apps / Tools Toggle
+                // Far Left: Dedicated 3D Tools Toggle Button
                 NeumorphicToggleGridButton(
                     isActive = (activeToolId == "tools"),
                     theme = theme,
+                    icon = Icons.Default.GridView,
                     onClick = {
                         onToggleLeftGrid()
                         if (forceShowTools) forceShowTools = false
@@ -2104,7 +2459,7 @@ fun UnifiedGboardTopStrip(
 
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // Scrollable row of 3D Neumorphic Tool Chips in user-configured arrangement
+                // Center: Dynamic scrollable container for actions & chips
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -2113,69 +2468,11 @@ fun UnifiedGboardTopStrip(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Smart Paste Chip (if clipboard content exists)
-                    if (!latestClip.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .height(44.dp)
-                                .shadow(2.dp, shape = RoundedCornerShape(12.dp))
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(
-                                            Color(0xFF1E293B).copy(alpha = 0.85f),
-                                            Color(0xFF0F172A).copy(alpha = 0.95f)
-                                        )
-                                    )
-                                )
-                                .border(
-                                    width = 0.8.dp,
-                                    brush = Brush.verticalGradient(
-                                        listOf(
-                                            Color(0xFF34D399).copy(alpha = 0.8f),
-                                            Color(0xFF10B981).copy(alpha = 0.2f)
-                                        )
-                                    ),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .clickable { onPasteClip(latestClip) }
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.ContentPaste,
-                                    contentDescription = "Paste",
-                                    tint = Color(0xFF34D399),
-                                    modifier = Modifier.size(17.dp)
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = latestClip.replace("\n", " ").trim().take(8),
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-
-                    // Render ordered toolbar items: Tools, Smart Reply, AI, Voice, Translate, Clipboard, Emoji, Themes, Settings, etc.
+                    // Render ordered toolbar items without redundant "tools" or "settings"
                     for (toolId in toolbarItems) {
                         when (toolId) {
                             "tools" -> {
-                                NeumorphicToolChip(
-                                    icon = Icons.Default.GridView,
-                                    label = "Tools",
-                                    isSelected = (activeToolId == "tools"),
-                                    iconColor = Color(0xFF34D399),
-                                    theme = theme,
-                                    onClick = onOpenTools
-                                )
+                                // Redundant tools button removed from scrollable bar since dedicated left tools button exists
                             }
 
                             "smart_reply" -> {
@@ -2201,11 +2498,12 @@ fun UnifiedGboardTopStrip(
                             }
 
                             "voice" -> {
+                                val isListening = voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING
                                 NeumorphicToolChip(
                                     icon = Icons.Default.Mic,
-                                    label = "Voice",
-                                    isSelected = (activeToolId == "voice"),
-                                    iconColor = Color(0xFF34D399),
+                                    label = if (isListening) "Listening…" else "Voice",
+                                    isSelected = (activeToolId == "voice") || isListening,
+                                    iconColor = theme.accentColor,
                                     theme = theme,
                                     onClick = onOpenVoice
                                 )
@@ -2256,114 +2554,11 @@ fun UnifiedGboardTopStrip(
                             }
 
                             "settings" -> {
-                                NeumorphicToolChip(
-                                    icon = Icons.Default.Settings,
-                                    label = "Settings",
-                                    isSelected = false,
-                                    iconColor = Color(0xFF94A3B8),
-                                    theme = theme,
-                                    onClick = onOpenSettings
-                                )
+                                // Dedicated settings gear is pinned to the far right
                             }
 
                             "lang_selector" -> {
-                                val isLangActive = (activeToolId == "languages")
-                                val shape = RoundedCornerShape(12.dp)
-                                Box(
-                                    modifier = Modifier
-                                        .height(44.dp)
-                                        .widthIn(min = 52.dp)
-                                        .then(
-                                            if (isLangActive) {
-                                                Modifier.shadow(
-                                                    elevation = 8.dp,
-                                                    shape = shape,
-                                                    ambientColor = Color(0xFF10B981),
-                                                    spotColor = Color(0xFF34D399)
-                                                )
-                                            } else {
-                                                Modifier.shadow(
-                                                    elevation = 2.dp,
-                                                    shape = shape,
-                                                    ambientColor = Color.Black.copy(alpha = 0.4f),
-                                                    spotColor = Color.Black.copy(alpha = 0.2f)
-                                                )
-                                            }
-                                        )
-                                        .clip(shape)
-                                        .background(
-                                            if (isLangActive) {
-                                                Brush.verticalGradient(
-                                                    listOf(
-                                                        Color(0xFF10B981),
-                                                        Color(0xFF059669),
-                                                        Color(0xFF047857)
-                                                    )
-                                                )
-                                            } else {
-                                                Brush.verticalGradient(
-                                                    listOf(
-                                                        Color(0xFF1E293B).copy(alpha = 0.85f),
-                                                        Color(0xFF0F172A).copy(alpha = 0.95f)
-                                                    )
-                                                )
-                                            }
-                                        )
-                                        .border(
-                                            width = if (isLangActive) 1.2.dp else 0.8.dp,
-                                            brush = if (isLangActive) {
-                                                Brush.verticalGradient(
-                                                    listOf(
-                                                        Color(0xFF6EE7B7),
-                                                        Color(0xFF10B981).copy(alpha = 0.5f)
-                                                    )
-                                                )
-                                            } else {
-                                                Brush.verticalGradient(
-                                                    listOf(
-                                                        Color.White.copy(alpha = 0.22f),
-                                                        Color.White.copy(alpha = 0.04f)
-                                                    )
-                                                )
-                                            },
-                                            shape = shape
-                                        )
-                                        .clickable { onOpenLanguages() }
-                                        .padding(horizontal = 7.dp, vertical = 3.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                        ) {
-                                            Text(
-                                                text = "${activeLanguage.flagEmoji} ${activeLanguage.code.uppercase()}",
-                                                color = if (isLangActive) Color.White else Color(0xFFF1F5F9),
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            if (realtimeAutoTranslate) {
-                                                Text(
-                                                    text = "⇄",
-                                                    color = if (isLangActive) Color.White else Color(0xFF34D399),
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = if (realtimeAutoTranslate) targetLang.code.uppercase() else "Lang",
-                                            color = if (isLangActive) Color.White else Color(0xFFCBD5E1),
-                                            fontSize = 9.5.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
+                                // Language pill removed from main top bar per user instructions
                             }
 
                             "stickers" -> {
@@ -2401,27 +2596,25 @@ fun UnifiedGboardTopStrip(
                         }
                     }
 
-                    // Always ensure Settings and Edit toolbar buttons are available at the end
-                    if (!toolbarItems.contains("settings")) {
-                        NeumorphicToolChip(
-                            icon = Icons.Default.Settings,
-                            label = "Settings",
-                            isSelected = false,
-                            iconColor = Color(0xFF94A3B8),
-                            theme = theme,
-                            onClick = onOpenSettings
-                        )
-                    }
-
                     NeumorphicToolChip(
                         icon = Icons.Default.Tune,
                         label = "Edit",
                         isSelected = (activeToolId == "customize"),
-                        iconColor = Color(0xFF94A3B8),
+                        iconColor = theme.textColor.copy(alpha = 0.7f),
                         theme = theme,
                         onClick = onOpenToolbarCustomize
                     )
                 }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Far Right: Pinned Dedicated Settings Gear Button
+                NeumorphicToggleGridButton(
+                    isActive = (activeToolId == "settings"),
+                    theme = theme,
+                    icon = Icons.Default.Settings,
+                    onClick = { onOpenSettings() }
+                )
             }
         }
     }
@@ -2429,7 +2622,7 @@ fun UnifiedGboardTopStrip(
 
 /**
  * 3D Neumorphic Extruded Tool Squircle Chip
- * Exactly recreates the glowing 3D pill/squircle design with soft specular top edge and ambient drop glow.
+ * Uses dynamic theme background, accent and key text color.
  */
 @Composable
 fun NeumorphicToolChip(
@@ -2443,20 +2636,20 @@ fun NeumorphicToolChip(
 ) {
     val shape = RoundedCornerShape(12.dp)
 
-    // 3D Neumorphic Background Brush
+    // 3D Neumorphic Background Brush derived from theme
     val backgroundBrush = if (isSelected) {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF10B981), // Vivid Glowing Emerald on top
-                Color(0xFF059669), // Rich Emerald mid
-                Color(0xFF047857)  // Deep Emerald base
+                theme.accentColor,
+                theme.accentColor.copy(alpha = 0.85f),
+                theme.accentColor.copy(alpha = 0.7f)
             )
         )
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF1E293B).copy(alpha = 0.85f), // Top convex highlight
-                Color(0xFF0F172A).copy(alpha = 0.95f)  // Base shadow
+                theme.keyColor.copy(alpha = 0.9f),
+                theme.keyColor.copy(alpha = 0.98f)
             )
         )
     }
@@ -2465,15 +2658,15 @@ fun NeumorphicToolChip(
     val borderBrush = if (isSelected) {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF6EE7B7), // Bright glowing rim
-                Color(0xFF10B981).copy(alpha = 0.5f)
+                theme.accentColor.copy(alpha = 0.9f),
+                theme.accentColor.copy(alpha = 0.4f)
             )
         )
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.22f), // Specular light highlight on top edge
-                Color.White.copy(alpha = 0.04f)  // Dark falloff
+                Color.White.copy(alpha = 0.18f),
+                Color.White.copy(alpha = 0.04f)
             )
         )
     }
@@ -2485,17 +2678,17 @@ fun NeumorphicToolChip(
             .then(
                 if (isSelected) {
                     Modifier.shadow(
-                        elevation = 8.dp,
+                        elevation = 6.dp,
                         shape = shape,
-                        ambientColor = Color(0xFF10B981),
-                        spotColor = Color(0xFF34D399)
+                        ambientColor = theme.accentColor,
+                        spotColor = theme.accentColor
                     )
                 } else {
                     Modifier.shadow(
                         elevation = 2.dp,
                         shape = shape,
-                        ambientColor = Color.Black.copy(alpha = 0.4f),
-                        spotColor = Color.Black.copy(alpha = 0.2f)
+                        ambientColor = Color.Black.copy(alpha = 0.35f),
+                        spotColor = Color.Black.copy(alpha = 0.15f)
                     )
                 }
             )
@@ -2523,7 +2716,7 @@ fun NeumorphicToolChip(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = label,
-                color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                color = if (isSelected) Color.White else theme.textColor.copy(alpha = 0.85f),
                 fontSize = 10.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
@@ -2534,42 +2727,43 @@ fun NeumorphicToolChip(
 }
 
 /**
- * Standalone 3D Neumorphic 4-Square Apps / Tools Grid Toggle Button
+ * Standalone 3D Neumorphic Square Apps / Tools / Action Button
  */
 @Composable
 fun NeumorphicToggleGridButton(
     isActive: Boolean,
     theme: KeyboardTheme,
+    icon: ImageVector = Icons.Default.GridView,
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(12.dp)
     val backgroundBrush = if (isActive) {
         Brush.verticalGradient(
             listOf(
-                Color(0xFF10B981),
-                Color(0xFF059669),
-                Color(0xFF047857)
+                theme.accentColor,
+                theme.accentColor.copy(alpha = 0.85f),
+                theme.accentColor.copy(alpha = 0.7f)
             )
         )
     } else {
         Brush.verticalGradient(
             listOf(
-                Color(0xFF1E293B).copy(alpha = 0.85f),
-                Color(0xFF0F172A).copy(alpha = 0.95f)
+                theme.keyColor.copy(alpha = 0.9f),
+                theme.keyColor.copy(alpha = 0.98f)
             )
         )
     }
     val borderBrush = if (isActive) {
         Brush.verticalGradient(
             listOf(
-                Color(0xFF6EE7B7),
-                Color(0xFF10B981).copy(alpha = 0.5f)
+                theme.accentColor.copy(alpha = 0.9f),
+                theme.accentColor.copy(alpha = 0.4f)
             )
         )
     } else {
         Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = 0.24f),
+                Color.White.copy(alpha = 0.20f),
                 Color.White.copy(alpha = 0.04f)
             )
         )
@@ -2583,15 +2777,15 @@ fun NeumorphicToggleGridButton(
                     Modifier.shadow(
                         elevation = 6.dp,
                         shape = shape,
-                        ambientColor = Color(0xFF10B981),
-                        spotColor = Color(0xFF34D399)
+                        ambientColor = theme.accentColor,
+                        spotColor = theme.accentColor
                     )
                 } else {
                     Modifier.shadow(
                         elevation = 2.dp,
                         shape = shape,
-                        ambientColor = Color.Black.copy(alpha = 0.4f),
-                        spotColor = Color.Black.copy(alpha = 0.2f)
+                        ambientColor = Color.Black.copy(alpha = 0.35f),
+                        spotColor = Color.Black.copy(alpha = 0.15f)
                     )
                 }
             )
@@ -2606,9 +2800,9 @@ fun NeumorphicToggleGridButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = Icons.Default.GridView,
-            contentDescription = "Tools Toggle",
-            tint = if (isActive) Color.White else Color(0xFFE2E8F0),
+            imageVector = icon,
+            contentDescription = "Tool Action",
+            tint = if (isActive) Color.White else theme.textColor.copy(alpha = 0.85f),
             modifier = Modifier.size(20.dp)
         )
     }
@@ -2951,30 +3145,50 @@ fun KeyButton(
     topHint: String? = null,
     height: Dp = 45.dp,
     showPreview: Boolean = true,
-    onClick: () -> Unit
+    enableLongPressSubSymbol: Boolean = true,
+    onClick: () -> Unit,
+    onInsertSubSymbol: ((String) -> Unit)? = null
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    var showingSubSymbolPreview by remember { mutableStateOf(false) }
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnInsertSubSymbol by rememberUpdatedState(onInsertSubSymbol)
 
     // Auto-dismiss safety timer ensures key pop preview never freezes or stays stuck on screen!
-    LaunchedEffect(isPressed) {
-        if (isPressed) {
+    LaunchedEffect(isPressed, showingSubSymbolPreview) {
+        if (isPressed && !showingSubSymbolPreview) {
             delay(120)
-            isPressed = false
+            if (!showingSubSymbolPreview) {
+                isPressed = false
+            }
         }
     }
 
     Box(
         modifier = modifier
             .height(height)
-            .pointerInput(text) {
-                detectTapGestures(
-                    onPress = {
+            .pointerInput(topHint, enableLongPressSubSymbol) {
+                kotlinx.coroutines.coroutineScope {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
                         isPressed = true
-                        onClick()
-                        tryAwaitRelease()
+                        showingSubSymbolPreview = false
+                        currentOnClick()
+
+                        val longPressJob = if (topHint != null && enableLongPressSubSymbol && currentOnInsertSubSymbol != null) {
+                            launch {
+                                delay(185)
+                                showingSubSymbolPreview = true
+                                currentOnInsertSubSymbol?.invoke(topHint)
+                            }
+                        } else null
+
+                        waitForUpOrCancellation()
+                        longPressJob?.cancel()
                         isPressed = false
+                        showingSubSymbolPreview = false
                     }
-                )
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -2987,7 +3201,7 @@ fun KeyButton(
                 theme = theme,
                 modifier = Modifier.fillMaxSize(),
                 isSpecial = false,
-                isSelected = false,
+                isSelected = showingSubSymbolPreview,
                 isPressed = isPressed,
                 height = height,
                 onClick = null
@@ -2995,9 +3209,9 @@ fun KeyButton(
                 if (topHint != null) {
                     Text(
                         text = topHint,
-                        color = theme.textSecondaryColor.copy(alpha = 0.65f),
+                        color = if (showingSubSymbolPreview) theme.accentColor else theme.textSecondaryColor.copy(alpha = 0.65f),
                         fontSize = 9.sp,
-                        fontWeight = FontWeight.Normal,
+                        fontWeight = if (showingSubSymbolPreview) FontWeight.Bold else FontWeight.Normal,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(top = 2.dp, end = 3.5.dp)
@@ -3020,6 +3234,7 @@ fun KeyButton(
             val previewHeight = (height * 0.95f).coerceIn(42.dp, 56.dp)
             val previewOffset = -(previewHeight - 2.dp)
             val previewFontSize = (previewHeight.value * 0.50f).coerceIn(21f, 29f).sp
+            val previewDisplayText = if (showingSubSymbolPreview && topHint != null) topHint else text
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -3029,21 +3244,22 @@ fun KeyButton(
                     .zIndex(100f)
                     .shadow(8.dp, shape = RoundedCornerShape(10.dp))
                     .background(
-                        if (theme.isDark) Color(0xFF282C37) else Color(0xFFF1F3F4),
+                        if (showingSubSymbolPreview) theme.accentColor
+                        else if (theme.isDark) Color(0xFF282C37) else Color(0xFFF1F3F4),
                         shape = RoundedCornerShape(10.dp)
                     )
                     .border(
                         1.dp,
-                        theme.primaryColor.copy(alpha = 0.6f),
+                        if (showingSubSymbolPreview) Color.White.copy(alpha = 0.8f) else theme.primaryColor.copy(alpha = 0.6f),
                         shape = RoundedCornerShape(10.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = text,
+                    text = previewDisplayText,
                     fontSize = previewFontSize,
                     fontWeight = FontWeight.Bold,
-                    color = if (theme.isDark) Color.White else Color(0xFF1E293B)
+                    color = if (showingSubSymbolPreview) Color.White else if (theme.isDark) Color.White else Color(0xFF1E293B)
                 )
             }
         }
@@ -3061,6 +3277,7 @@ fun KeySpecialButton(
     onClick: () -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    val currentOnClick by rememberUpdatedState(onClick)
 
     LaunchedEffect(isPressed) {
         if (isPressed) {
@@ -3072,15 +3289,14 @@ fun KeySpecialButton(
     Box(
         modifier = modifier
             .height(height)
-            .pointerInput(text ?: icon.toString()) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        onClick()
-                        tryAwaitRelease()
-                        isPressed = false
-                    }
-                )
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    currentOnClick()
+                    waitForUpOrCancellation()
+                    isPressed = false
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -3297,71 +3513,23 @@ fun BottomActionRow(
                     }
                 )
             } else {
-                Box(
-                    modifier = Modifier
-                        .weight(1.0f)
-                        .height(height)
-                        .clickable { onComma() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
-                    ) {
-                        ThemedKeyBox(
-                            theme = theme,
-                            modifier = Modifier.fillMaxSize(),
-                            isSpecial = true,
-                            isSelected = false,
-                            height = height,
-                            onClick = null
-                        ) {
-                            Text(
-                                text = ",",
-                                color = theme.textColor,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.align(Alignment.Center)
-                            )
-                        }
-                    }
-                }
+                KeySpecialButton(
+                    modifier = Modifier.weight(1.0f),
+                    theme = theme,
+                    text = ",",
+                    height = height,
+                    onClick = onComma
+                )
             }
 
             // 3. Dedicated Emoji Key (Distinct side-by-side key) - Weight 1.0f
-            Box(
-                modifier = Modifier
-                    .weight(1.0f)
-                    .height(height)
-                    .clickable { onOpenEmoji() },
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 1.5.dp, vertical = 2.75.dp)
-                ) {
-                    ThemedKeyBox(
-                        theme = theme,
-                        modifier = Modifier.fillMaxSize(),
-                        isSpecial = true,
-                        isSelected = false,
-                        height = height,
-                        onClick = null
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SentimentSatisfied,
-                            contentDescription = "Emoji",
-                            tint = theme.textColor,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .align(Alignment.Center)
-                        )
-                    }
-                }
-            }
+            KeySpecialButton(
+                modifier = Modifier.weight(1.0f),
+                theme = theme,
+                icon = Icons.Default.SentimentSatisfied,
+                height = height,
+                onClick = onOpenEmoji
+            )
 
             // 4. Space Bar (Weight 4.8f -> authentic Gboard spacious footprint) with Cursor Scrubbing & Language Label
             Box(
@@ -3716,212 +3884,285 @@ fun LanguagePanel(
     theme: KeyboardTheme,
     activeLanguage: Language,
     targetLanguage: Language,
+    initialTab: String = "SOURCE",
     onSelectSourceLanguage: (Language) -> Unit,
     onSelectTargetLanguage: (Language) -> Unit,
     onClose: () -> Unit,
     panelHeight: Dp = 265.dp
 ) {
+    var selectedTab by remember(initialTab) { mutableStateOf(initialTab) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val allLanguages = Language.ALL_LANGUAGES
+    val displayLanguages = remember(searchQuery, selectedTab) {
+        val baseList = if (selectedTab == "TARGET") {
+            listOf(Language.AUTO) + allLanguages.filter { it.id != "auto" }
+        } else {
+            allLanguages
+        }
+        if (searchQuery.isBlank()) {
+            baseList
+        } else {
+            val q = searchQuery.trim().lowercase()
+            baseList.filter {
+                it.displayName.lowercase().contains(q) ||
+                it.nativeName.lowercase().contains(q) ||
+                it.code.lowercase().contains(q)
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .height(panelHeight)
             .background(theme.backgroundColor)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 8.dp, vertical = 6.dp)
     ) {
-        // 1. Header Bar
+        // 1. Header Bar: Title, Search Field, Done Button
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Icon(
                     Icons.Default.Language,
-                    contentDescription = null,
+                    contentDescription = "Language Drawer",
                     tint = theme.accentColor,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(17.dp)
                 )
                 Text(
-                    "Language & Translation",
+                    "Languages",
                     color = theme.textColor,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
+                    fontSize = 12.5.sp
                 )
             }
 
+            // Compact Search Bar inside keyboard
             Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = theme.primaryColor.copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, theme.primaryColor.copy(alpha = 0.5f)),
-                modifier = Modifier.clickable { onClose() }
+                shape = RoundedCornerShape(8.dp),
+                color = theme.surfaceColor,
+                border = BorderStroke(0.8.dp, theme.keyBorderColor),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(30.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = theme.textSecondaryColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = theme.textColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Normal
+                        ),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    "Search 30+ languages...",
+                                    color = theme.textSecondaryColor.copy(alpha = 0.7f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier.size(18.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Clear",
+                                tint = theme.textSecondaryColor,
+                                modifier = Modifier.size(11.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Done Button
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = theme.primaryColor,
+                modifier = Modifier
+                    .height(30.dp)
+                    .clickable { onClose() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    Text("✓ Done", color = theme.accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("✓ Done", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // 2. INPUT / TYPING LANGUAGE (Horizontal Scroll)
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "📥 Typing Language",
-                    color = theme.textColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-                Text(
-                    "${activeLanguage.flagEmoji} ${activeLanguage.displayName}",
-                    color = theme.accentColor,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.sp
-                )
-            }
-
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(Language.ALL_LANGUAGES) { lang ->
-                    val isSelected = activeLanguage.id == lang.id
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) theme.primaryColor.copy(alpha = 0.25f) else theme.surfaceColor,
-                        border = BorderStroke(1.dp, if (isSelected) theme.primaryColor else theme.keyBorderColor),
-                        modifier = Modifier.clickable {
-                            onSelectSourceLanguage(lang)
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(lang.flagEmoji, fontSize = 16.sp)
-                            Column {
-                                Text(
-                                    lang.displayName,
-                                    color = if (isSelected) theme.accentColor else theme.textColor,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 11.sp
-                                )
-                                Text(
-                                    lang.nativeName,
-                                    color = theme.textSecondaryColor,
-                                    fontSize = 9.sp
-                                )
-                            }
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = theme.accentColor,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. TRANSLATE TO / OUTPUT LANGUAGE (Horizontal Scroll)
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "📤 Translate Output",
-                    color = theme.textColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-                Text(
-                    "${targetLanguage.flagEmoji} ${targetLanguage.displayName}",
-                    color = Color(0xFF34D399),
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.sp
-                )
-            }
-
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(Language.ALL_LANGUAGES) { lang ->
-                    val isSelected = targetLanguage.id == lang.id
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) Color(0xFF10B981).copy(alpha = 0.25f) else theme.surfaceColor,
-                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF10B981) else theme.keyBorderColor),
-                        modifier = Modifier.clickable {
-                            onSelectTargetLanguage(lang)
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(lang.flagEmoji, fontSize = 16.sp)
-                            Column {
-                                Text(
-                                    lang.displayName,
-                                    color = if (isSelected) Color(0xFF34D399) else theme.textColor,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 11.sp
-                                )
-                                Text(
-                                    lang.nativeName,
-                                    color = theme.textSecondaryColor,
-                                    fontSize = 9.sp
-                                )
-                            }
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = Color(0xFF10B981),
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Return to Keyboard Action Bar
-        Button(
-            onClick = onClose,
-            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryColor),
-            shape = RoundedCornerShape(8.dp),
+        // 2. Tab Segmented Control: Typing Language vs Translation Target
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(34.dp),
-            contentPadding = PaddingValues(0.dp)
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("Back to Keyboard", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            // Tab 1: Typing / Input Language
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (selectedTab == "SOURCE") theme.primaryColor.copy(alpha = 0.22f) else theme.surfaceColor.copy(alpha = 0.5f),
+                border = BorderStroke(
+                    width = if (selectedTab == "SOURCE") 1.4.dp else 0.8.dp,
+                    color = if (selectedTab == "SOURCE") theme.primaryColor else theme.keyBorderColor
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { selectedTab = "SOURCE" }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "📥 Typing: ${activeLanguage.flagEmoji} ${activeLanguage.displayName}",
+                        color = if (selectedTab == "SOURCE") theme.accentColor else theme.textSecondaryColor,
+                        fontSize = 10.5.sp,
+                        fontWeight = if (selectedTab == "SOURCE") FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Tab 2: Translation Target Language
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (selectedTab == "TARGET") Color(0xFF10B981).copy(alpha = 0.22f) else theme.surfaceColor.copy(alpha = 0.5f),
+                border = BorderStroke(
+                    width = if (selectedTab == "TARGET") 1.4.dp else 0.8.dp,
+                    color = if (selectedTab == "TARGET") Color(0xFF10B981) else theme.keyBorderColor
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { selectedTab = "TARGET" }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "📤 Translate: ${targetLanguage.flagEmoji} ${targetLanguage.displayName}",
+                        color = if (selectedTab == "TARGET") Color(0xFF34D399) else theme.textSecondaryColor,
+                        fontSize = 10.5.sp,
+                        fontWeight = if (selectedTab == "TARGET") FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        // 3. Scrollable Language Grid (LazyVerticalGrid with 2 columns: smooth, native within keyboard)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            contentPadding = PaddingValues(vertical = 2.dp)
+        ) {
+            items(displayLanguages, key = { "${it.id}_${selectedTab}" }) { lang ->
+                val isSelected = if (selectedTab == "SOURCE") {
+                    lang.id == activeLanguage.id
+                } else {
+                    lang.id == targetLanguage.id
+                }
+                val activeTint = if (selectedTab == "TARGET") Color(0xFF10B981) else theme.accentColor
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) activeTint.copy(alpha = 0.18f) else theme.surfaceColor,
+                    border = BorderStroke(
+                        width = if (isSelected) 1.4.dp else 0.7.dp,
+                        color = if (isSelected) activeTint else theme.keyBorderColor
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (selectedTab == "SOURCE") {
+                                onSelectSourceLanguage(lang)
+                            } else {
+                                onSelectTargetLanguage(lang)
+                            }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Text(lang.flagEmoji, fontSize = 16.sp)
+                            Column {
+                                Text(
+                                    text = lang.displayName,
+                                    color = if (isSelected) activeTint else theme.textColor,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = lang.nativeName,
+                                    color = theme.textSecondaryColor,
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = activeTint,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -5576,6 +5817,515 @@ fun DedicatedNumericPad(
                 height = rowHeight,
                 onClick = onEnter
             )
+        }
+    }
+}
+
+@Composable
+fun GboardFloatingTranslateBar(
+    theme: KeyboardTheme,
+    sourceLang: Language,
+    targetLang: Language,
+    sourceText: String,
+    resultText: String,
+    isTranslating: Boolean,
+    voiceStatus: VoiceTypingStatus,
+    voiceRmsLevel: Float,
+    allLanguages: List<Language>,
+    onSourceLangChange: (Language) -> Unit,
+    onTargetLangChange: (Language) -> Unit,
+    onSwapLanguages: () -> Unit,
+    onSourceTextChange: (String) -> Unit,
+    onCommitTranslation: (String) -> Unit,
+    onToggleVoiceTranslate: () -> Unit,
+    onClear: () -> Unit,
+    onClose: () -> Unit,
+    activeDropdown: String? = null,
+    onToggleDropdown: ((String) -> Unit)? = null
+) {
+    val isListening = voiceStatus == VoiceTypingStatus.LISTENING || voiceStatus == VoiceTypingStatus.CONNECTING
+
+    val pulseScale by animateFloatAsState(
+        targetValue = if (isListening) (1f + (voiceRmsLevel.coerceIn(0f, 10f) / 25f)).coerceIn(1f, 1.25f) else 1f,
+        animationSpec = tween(150),
+        label = "mic_pulse"
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = theme.surfaceColor,
+        shadowElevation = 3.dp,
+        border = BorderStroke(1.dp, theme.accentColor.copy(alpha = 0.25f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            // Row 1: Source Language Pill ⇄ Target Language Pill | Mic | Close
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Source Language Pill
+                val isSourceActive = activeDropdown == "SOURCE"
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSourceActive) theme.accentColor.copy(alpha = 0.15f) else theme.backgroundColor.copy(alpha = 0.85f),
+                    border = BorderStroke(
+                        if (isSourceActive) 1.5.dp else 0.5.dp,
+                        if (isSourceActive) theme.accentColor else theme.accentColor.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            onToggleDropdown?.invoke("SOURCE")
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${sourceLang.flagEmoji} ${sourceLang.displayName}",
+                            color = theme.textColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Icon(
+                            imageVector = if (isSourceActive) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                            contentDescription = "Select Source Language",
+                            tint = if (isSourceActive) theme.accentColor else theme.textSecondaryColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // Swap Direction Button (⇄)
+                IconButton(
+                    onClick = onSwapLanguages,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SwapHoriz,
+                        contentDescription = "Swap Languages",
+                        tint = theme.accentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Target Language Pill
+                val isTargetActive = activeDropdown == "TARGET"
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isTargetActive) theme.accentColor.copy(alpha = 0.15f) else theme.backgroundColor.copy(alpha = 0.85f),
+                    border = BorderStroke(
+                        if (isTargetActive) 1.5.dp else 0.5.dp,
+                        if (isTargetActive) theme.accentColor else theme.accentColor.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            onToggleDropdown?.invoke("TARGET")
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${targetLang.flagEmoji} ${targetLang.displayName}",
+                            color = theme.textColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Icon(
+                            imageVector = if (isTargetActive) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                            contentDescription = "Select Target Language",
+                            tint = if (isTargetActive) theme.accentColor else theme.textSecondaryColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // Live Audio Mic Button with Pulsing Scale
+                Surface(
+                    shape = CircleShape,
+                    color = if (isListening) theme.accentColor else theme.backgroundColor,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .scale(pulseScale)
+                        .clickable { onToggleVoiceTranslate() }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isListening) Icons.Default.Mic else Icons.Default.MicNone,
+                            contentDescription = "Voice Translate",
+                            tint = if (isListening) Color.White else theme.accentColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // Close Button (✕)
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close Floating Translate Bar",
+                        tint = theme.textSecondaryColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Row 2: Live Translation Stream & Direct Commit Box
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = theme.backgroundColor.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                ) {
+                    // Source Input / Speech Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = sourceLang.flagEmoji,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                        Text(
+                            text = if (sourceText.isNotBlank()) sourceText else if (isListening) "Listening... speak now" else "Type or speak to translate...",
+                            color = if (sourceText.isNotBlank()) theme.textColor else theme.textSecondaryColor.copy(alpha = 0.7f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isListening) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4CAF50))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        if (sourceText.isNotBlank() || resultText.isNotBlank()) {
+                            IconButton(
+                                onClick = onClear,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear",
+                                    tint = theme.textSecondaryColor,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Real-time Live Translation Card
+                    if (resultText.isNotBlank() || isTranslating) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = theme.accentColor.copy(alpha = 0.15f),
+                            border = BorderStroke(0.5.dp, theme.accentColor.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = resultText.isNotBlank()) {
+                                    onCommitTranslation(resultText)
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Text(
+                                        text = "➔",
+                                        color = theme.accentColor,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = targetLang.flagEmoji,
+                                        fontSize = 12.sp
+                                    )
+                                    if (resultText.isNotBlank()) {
+                                        Text(
+                                            text = resultText,
+                                            color = theme.textColor,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                    } else if (isTranslating) {
+                                        Text(
+                                            text = "Translating...",
+                                            color = theme.textSecondaryColor,
+                                            fontSize = 11.sp,
+                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (isTranslating) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(13.dp),
+                                            strokeWidth = 1.5.dp,
+                                            color = theme.accentColor
+                                        )
+                                    }
+                                    if (resultText.isNotBlank()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = theme.accentColor,
+                                            modifier = Modifier.clickable { onCommitTranslation(resultText) }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Insert",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Text(
+                                                    text = "Insert",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FloatingDropdownLanguageSlip(
+    isTarget: Boolean,
+    currentLanguage: Language,
+    languages: List<Language>,
+    theme: KeyboardTheme,
+    onSelectLanguage: (Language) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Popular language IDs upfront matching Gboard & the user's reference:
+    // Bengali, Chinese, French, German, Russian, English, Spanish, Hindi, Arabic, Portuguese, Japanese, Italian, Korean
+    val popularIds = remember(isTarget) {
+        if (isTarget) {
+            listOf("bn", "zh", "fr", "de", "ru", "en", "es", "hi", "ar", "pt", "ja", "it", "ko")
+        } else {
+            listOf("auto", "bn", "zh", "fr", "de", "ru", "en", "es", "hi", "ar", "pt", "ja", "it", "ko")
+        }
+    }
+
+    val displayLanguages = remember(searchQuery, isTarget) {
+        val allList = mutableListOf<Language>()
+        if (!isTarget) {
+            allList.add(Language.AUTO)
+        }
+        allList.addAll(Language.ALL_LANGUAGES.filter { it.id != "auto" })
+
+        val q = searchQuery.trim().lowercase()
+        if (q.isNotEmpty()) {
+            allList.filter {
+                it.displayName.lowercase().contains(q) ||
+                it.nativeName.lowercase().contains(q) ||
+                it.code.lowercase().contains(q)
+            }
+        } else {
+            val popularList = popularIds.mapNotNull { id ->
+                if (id == "auto") Language.AUTO
+                else allList.firstOrNull { it.id.equals(id, ignoreCase = true) }
+            }
+            val remainingList = allList.filter { lang ->
+                popularIds.none { it.equals(lang.id, ignoreCase = true) }
+            }.sortedBy { it.displayName }
+            popularList + remainingList
+        }
+    }
+
+    // Frosted-Glass Floating Dropdown Slip: Width ~176dp, Height ~210dp, 14dp rounded corners
+    Surface(
+        modifier = modifier
+            .width(176.dp)
+            .height(210.dp)
+            .shadow(
+                elevation = 10.dp,
+                shape = RoundedCornerShape(14.dp),
+                ambientColor = Color.Black.copy(alpha = 0.25f),
+                spotColor = Color.Black.copy(alpha = 0.3f)
+            ),
+        shape = RoundedCornerShape(14.dp),
+        color = theme.surfaceColor.copy(alpha = 0.98f),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.5f),
+                    theme.accentColor.copy(alpha = 0.3f)
+                )
+            )
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 4.dp)
+        ) {
+            // Inline Micro-Search Filter Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(theme.backgroundColor.copy(alpha = 0.85f))
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = theme.textSecondaryColor,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    textStyle = TextStyle(
+                        color = theme.textColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { innerTextField ->
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search...",
+                                color = theme.textSecondaryColor.copy(alpha = 0.6f),
+                                fontSize = 11.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                )
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear search",
+                        tint = theme.textSecondaryColor,
+                        modifier = Modifier
+                            .size(13.dp)
+                            .clickable { searchQuery = "" }
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = theme.textSecondaryColor.copy(alpha = 0.15f),
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+
+            // Scrollable Language List with smooth one-touch instant selection
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(vertical = 2.dp)
+            ) {
+                items(displayLanguages, key = { "${it.id}_${it.code}" }) { lang ->
+                    val isSelected = lang.id.equals(currentLanguage.id, ignoreCase = true)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelectLanguage(lang)
+                            }
+                            .background(
+                                if (isSelected) theme.accentColor.copy(alpha = 0.14f)
+                                else Color.Transparent
+                            )
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = lang.displayName,
+                            color = if (isSelected) theme.accentColor else theme.textColor,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = theme.accentColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
